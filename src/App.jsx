@@ -1,23 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import {
-  getFirestore, collection, addDoc, onSnapshot, query,
-  orderBy, doc, updateDoc, deleteDoc
-} from 'firebase/firestore';
-import {
-  Save, Search, Trash2, Edit, Info, CheckCircle, XCircle, Users,
-  Download, Printer, Wifi, LayoutDashboard, ClipboardList,
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { 
+  Save, Search, Trash2, Edit, Info, CheckCircle, XCircle, Users, 
+  Download, Printer, Wifi, LayoutDashboard, ClipboardList, MapPin, Phone, 
   Wrench, CalendarClock, CheckCircle2, Clock, DollarSign,
-  Database, Layers, Plus, ShieldCheck, ShieldX, ShieldAlert,
-  FileSearch, Calendar, AlertCircle, TrendingUp, Hash,
-  ChevronRight, Star, X, Package, AlertTriangle,
-  TrendingDown, Banknote, Receipt, History, BoxSelect,
-  BarChart2, ArrowUpRight, Boxes, ChevronDown
+  Database, Layers, Plus // Adicionados para o módulo de Bobinas
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
-// ── Firebase ──────────────────────────────────────────────────────────────────
+// --- CONFIGURAÇÃO FIREBASE ---
 const firebaseConfig = {
   apiKey: "AIzaSyBX7mv26WPpYNBVpfQufvpdZdQVtSAITZs",
   authDomain: "lumix-doc.firebaseapp.com",
@@ -26,1105 +19,615 @@ const firebaseConfig = {
   messagingSenderId: "625727333695",
   appId: "1:625727333695:web:62efac7740bdf7d3391f8a"
 };
+
 const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
+const db = getFirestore(app);
 
-// ── Constantes financeiras ────────────────────────────────────────────────────
-const VALORES_OS = {
-  'Nova Ativação':          70,
-  'Reparo Técnico':         50,
-  'Mudança de Endereço':    50,
-  'Recolha de Equipamento': 25,
-};
-
-const fmt = (n) => n.toLocaleString('pt-BR', { style:'currency', currency:'BRL' });
-
-// ── Formatação de documentos ──────────────────────────────────────────────────
-const fmtCPF  = v => v.replace(/\D/g,'').slice(0,11).replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d{1,2})$/,'$1-$2');
-const fmtCNPJ = v => v.replace(/\D/g,'').slice(0,14).replace(/(\d{2})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1/$2').replace(/(\d{4})(\d{1,2})$/,'$1-$2');
-const fmtDoc  = (v,t) => t==='CPF' ? fmtCPF(v) : fmtCNPJ(v);
-
-// ── Estilos globais ───────────────────────────────────────────────────────────
-const GlobalStyle = () => (
+// --- COMPONENTE DE ESTILO ---
+const TailwindStyle = () => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap');
     @import url('https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css');
-    *{box-sizing:border-box}
-    body{background:#080c14;color:#f0f4ff;font-family:'Space Grotesk','Inter',sans-serif;-webkit-font-smoothing:antialiased}
-    .glass{background:rgba(16,24,40,.75);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.07)}
-    input,textarea,select{background:rgba(8,12,20,.8)!important;color:#e2e8f0!important;border:1px solid rgba(255,255,255,.1)!important;transition:all .2s}
-    input::placeholder,textarea::placeholder{color:#4a5568!important}
-    input:focus,select:focus,textarea:focus{border-color:rgba(99,102,241,.6)!important;outline:none!important;box-shadow:0 0 0 3px rgba(99,102,241,.15)!important;background:rgba(12,18,32,.9)!important}
-    option{background:#0f172a}
-    .scroll::-webkit-scrollbar{width:5px;height:5px}
-    .scroll::-webkit-scrollbar-track{background:transparent}
-    .scroll::-webkit-scrollbar-thumb{background:#1e293b;border-radius:10px}
-    .progress-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.05);overflow:hidden}
-    .row-hover{transition:background .15s}.row-hover:hover{background:rgba(255,255,255,.025)}
-    @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-    .page{animation:fadeUp .35s ease forwards}
-    @keyframes pdot{0%,100%{opacity:1}50%{opacity:.4}}
-    .pdot{animation:pdot 2s ease-in-out infinite}
-    @keyframes toastIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
-    .toast{animation:toastIn .3s ease forwards}
-    .menu-card{transition:all .3s cubic-bezier(.4,0,.2,1)}
-    .menu-card:hover{transform:translateY(-4px)}
-    .menu-card:active{transform:scale(.99)}
-    .stat-card{background:rgba(16,24,40,.6);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:18px 20px;transition:all .2s}
-    .stat-card:hover{border-color:rgba(255,255,255,.12)}
-    .btn{display:flex;align-items:center;justify-content:center;gap:10px;padding:13px 22px;border-radius:14px;font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;transition:all .2s;cursor:pointer;border:none}
-    .btn:active{transform:scale(.98)}
-    .fl{font-size:10px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.1em;margin:0 0 6px 4px}
-    .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:50;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px}
-    .modal-panel{background:#0d1526;border:1px solid rgba(255,255,255,.08);border-radius:20px;width:100%;max-width:520px;max-height:calc(100vh - 32px);overflow-y:auto;display:flex;flex-direction:column}
+    body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
+    .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+    input, textarea, select { background: rgba(15, 23, 42, 0.6) !important; color: white !important; border: 1px solid rgba(255,255,255,0.1) !important; }
+    input:focus, select:focus, textarea:focus { border-color: #3b82f6 !important; outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    .progress-bar { height: 8px; border-radius: 4px; background: #334155; overflow: hidden; }
   `}</style>
 );
 
-// ── Toast system ──────────────────────────────────────────────────────────────
-const ToastCtx = React.createContext(null);
-function ToastProvider({ children }) {
-  const [toasts, setToasts] = useState([]);
-  const add = (msg, type='success') => {
-    const id = Date.now();
-    setToasts(p => [...p, {id, msg, type}]);
-    setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3200);
-  };
-  const colors = { success:'#22c55e', error:'#ef4444', warn:'#f59e0b', info:'#60a5fa' };
-  return (
-    <ToastCtx.Provider value={add}>
-      {children}
-      <div style={{position:'fixed',bottom:24,right:24,zIndex:999,display:'flex',flexDirection:'column',gap:8}}>
-        {toasts.map(t => (
-          <div key={t.id} className="toast" style={{background:'rgba(16,24,40,.95)',border:`1px solid ${colors[t.type]}40`,borderLeft:`3px solid ${colors[t.type]}`,
-            padding:'12px 18px',borderRadius:12,color:'white',fontSize:13,fontWeight:600,maxWidth:320,boxShadow:'0 8px 24px rgba(0,0,0,.5)'}}>
-            {t.msg}
-          </div>
-        ))}
-      </div>
-    </ToastCtx.Provider>
-  );
-}
-const useToast = () => React.useContext(ToastCtx);
-
-// ── Score Ring ────────────────────────────────────────────────────────────────
-const ScoreRing = ({ score, size=56 }) => {
-  const r=22, c=2*Math.PI*r, pct=Math.min(Math.max(score/1000,0),1);
-  const col = score>=700?'#22c55e':score>=500?'#f59e0b':score>=300?'#f97316':'#ef4444';
-  return (
-    <div style={{position:'relative',width:size,height:size,flexShrink:0}}>
-      <svg width={size} height={size} style={{transform:'rotate(-90deg)'}}>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,.06)" strokeWidth="4"/>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={col} strokeWidth="4"
-          strokeDasharray={`${pct*c} ${c}`} strokeLinecap="round"/>
-      </svg>
-      <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
-        <span style={{fontSize:11,fontWeight:800,color:col}}>{score}</span>
-      </div>
-    </div>
-  );
-};
-
-// ── Resultado badge ───────────────────────────────────────────────────────────
-const ResultBadge = ({ r }) => {
-  const m = {
-    'Aprovado':         {bg:'rgba(34,197,94,.12)',  col:'#4ade80', bd:'rgba(34,197,94,.3)',  ic:<ShieldCheck size={11}/>},
-    'Reprovado':        {bg:'rgba(239,68,68,.12)',   col:'#f87171', bd:'rgba(239,68,68,.3)',  ic:<ShieldX size={11}/>},
-    'Com Restrições':   {bg:'rgba(251,191,36,.12)',  col:'#fbbf24', bd:'rgba(251,191,36,.3)', ic:<ShieldAlert size={11}/>},
-    'Pendente Análise': {bg:'rgba(148,163,184,.12)', col:'#94a3b8', bd:'rgba(148,163,184,.3)',ic:<Clock size={11}/>},
-  };
-  const c = m[r]||m['Pendente Análise'];
-  return <span style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 9px',borderRadius:7,background:c.bg,color:c.col,border:`1px solid ${c.bd}`,fontSize:10,fontWeight:700,letterSpacing:'.05em',textTransform:'uppercase'}}>{c.ic}{r}</span>;
-};
-
-// ── Status badge OS ───────────────────────────────────────────────────────────
-const OSStatusBadge = ({status}) => {
-  const m = { 'Pendente':{col:'#fbbf24',bg:'rgba(245,158,11,.12)',bd:'rgba(245,158,11,.25)'},
-              'Concluído':{col:'#4ade80',bg:'rgba(34,197,94,.12)',bd:'rgba(34,197,94,.25)'},
-              'Pago':{col:'#60a5fa',bg:'rgba(59,130,246,.12)',bd:'rgba(59,130,246,.25)'} };
-  const c = m[status]||m['Pendente'];
-  return <span style={{fontSize:10,padding:'3px 9px',borderRadius:7,background:c.bg,color:c.col,border:`1px solid ${c.bd}`,fontWeight:700,letterSpacing:'.05em',textTransform:'uppercase'}}>{status}</span>;
-};
-
-// ── Modal Histórico do Cliente ────────────────────────────────────────────────
-function HistoricoModal({ cliente, ordens, onClose }) {
-  const os = ordens.filter(o => o.nome?.toLowerCase() === cliente.nome?.toLowerCase());
-  const totalPago = os.filter(o=>o.status==='Pago').reduce((a,o)=>a+(VALORES_OS[o.tipo]||0),0);
-  const tipoCor = {'Nova Ativação':'#3b82f6','Reparo Técnico':'#ef4444','Mudança de Endereço':'#f59e0b','Recolha de Equipamento':'#a78bfa'};
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal-panel scroll" onClick={e=>e.stopPropagation()}>
-        {/* Header */}
-        <div style={{padding:'20px 24px',borderBottom:'1px solid rgba(255,255,255,.06)',display:'flex',justifyContent:'space-between',alignItems:'flex-start',position:'sticky',top:0,background:'#0d1526',zIndex:1}}>
-          <div>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-              <History size={16} color="#a78bfa"/>
-              <h2 style={{fontSize:15,fontWeight:800,color:'white',margin:0,textTransform:'uppercase',letterSpacing:'.04em'}}>Histórico</h2>
-            </div>
-            <p style={{fontSize:13,color:'#64748b',margin:0}}>{cliente.nome}</p>
-          </div>
-          <button onClick={onClose} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.08)',borderRadius:8,padding:6,cursor:'pointer',color:'#64748b',display:'flex'}}>
-            <X size={16}/>
-          </button>
-        </div>
-        {/* Info do cliente */}
-        <div style={{padding:'16px 24px',borderBottom:'1px solid rgba(255,255,255,.05)',display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-          {[
-            {label:'Serial',val:cliente.serial||'—'},
-            {label:'Login',val:cliente.login||'—'},
-            {label:'CTO / Porta',val:cliente.cto?`${cliente.cto} / P${cliente.porta}`:'—'},
-            {label:'Status',val:cliente.status},
-          ].map(({label,val})=>(
-            <div key={label} style={{background:'rgba(255,255,255,.03)',borderRadius:10,padding:'10px 12px',border:'1px solid rgba(255,255,255,.04)'}}>
-              <p style={{fontSize:9,fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'.08em',margin:'0 0 3px'}}>{label}</p>
-              <p style={{fontSize:13,fontWeight:700,color:'white',margin:0,fontFamily:label==='Serial'||label==='Login'?'monospace':'inherit'}}>{val}</p>
-            </div>
-          ))}
-        </div>
-        {/* Resumo financeiro */}
-        <div style={{padding:'14px 24px',borderBottom:'1px solid rgba(255,255,255,.05)',display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
-          {[
-            {label:'Total OS',val:os.length,col:'#a78bfa'},
-            {label:'Pagas',val:os.filter(o=>o.status==='Pago').length,col:'#4ade80'},
-            {label:'Recebido',val:fmt(totalPago),col:'#34d399'},
-          ].map(({label,val,col})=>(
-            <div key={label} style={{textAlign:'center',background:'rgba(255,255,255,.03)',borderRadius:10,padding:'10px 8px',border:'1px solid rgba(255,255,255,.04)'}}>
-              <p style={{fontSize:9,fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'.08em',margin:'0 0 4px'}}>{label}</p>
-              <p style={{fontSize:18,fontWeight:800,color:col,margin:0}}>{val}</p>
-            </div>
-          ))}
-        </div>
-        {/* Lista OS */}
-        <div style={{padding:'16px 24px',display:'flex',flexDirection:'column',gap:8}}>
-          <p style={{fontSize:10,fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'.08em',margin:'0 0 4px'}}>Ordens de Serviço ({os.length})</p>
-          {os.length===0 && <p style={{color:'#334155',fontSize:12,textAlign:'center',padding:'24px 0',border:'1px dashed rgba(255,255,255,.06)',borderRadius:12}}>Nenhuma OS encontrada</p>}
-          {os.map(o=>(
-            <div key={o.id} style={{background:'rgba(8,12,20,.5)',borderRadius:12,padding:'12px 14px',border:'1px solid rgba(255,255,255,.04)',borderLeft:`3px solid ${tipoCor[o.tipo]||'#64748b'}`}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
-                <div style={{flex:1}}>
-                  <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:5,flexWrap:'wrap'}}>
-                    <span style={{fontSize:9,padding:'2px 7px',borderRadius:5,background:`${tipoCor[o.tipo]||'#64748b'}18`,color:tipoCor[o.tipo]||'#64748b',fontWeight:700,letterSpacing:'.05em',textTransform:'uppercase'}}>{o.tipo}</span>
-                    <OSStatusBadge status={o.status}/>
-                  </div>
-                  <div style={{display:'flex',gap:12,fontSize:11,color:'#64748b',flexWrap:'wrap'}}>
-                    {o.dataAgendada&&<span style={{display:'flex',alignItems:'center',gap:3}}><Calendar size={11}/>{new Date(o.dataAgendada).toLocaleDateString('pt-BR')}</span>}
-                    {o.relato&&<span style={{fontStyle:'italic',color:'#475569'}}>"{o.relato.slice(0,50)}{o.relato.length>50?'…':''}"</span>}
-                  </div>
-                </div>
-                <div style={{textAlign:'right',flexShrink:0}}>
-                  <p style={{fontSize:15,fontWeight:800,color:o.status==='Pago'?'#4ade80':o.status==='Concluído'?'#fbbf24':'#64748b',margin:0}}>{fmt(VALORES_OS[o.tipo]||0)}</p>
-                  <p style={{fontSize:9,color:'#334155',margin:'2px 0 0',textTransform:'uppercase',letterSpacing:'.06em'}}>{o.status==='Pago'?'recebido':o.status==='Concluído'?'a receber':'pendente'}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Busca global overlay ──────────────────────────────────────────────────────
-function BuscaGlobal({ clientes, ordens, consultas, onClose, onNav }) {
-  const [q, setQ] = useState('');
-  const ref = useRef(null);
-  useEffect(()=>{ ref.current?.focus(); },[]);
-
-  const s = q.toLowerCase().trim();
-  const res = s.length < 2 ? null : {
-    clientes:  clientes.filter(c  => c.nome?.toLowerCase().includes(s)||c.serial?.toLowerCase().includes(s)||c.login?.toLowerCase().includes(s)).slice(0,5),
-    ordens:    ordens.filter(o    => o.nome?.toLowerCase().includes(s)||o.serial?.toLowerCase().includes(s)||o.cto?.toLowerCase().includes(s)).slice(0,5),
-    consultas: consultas.filter(c => c.nome?.toLowerCase().includes(s)||c.documento?.toLowerCase().includes(s)).slice(0,4),
-  };
-  const total = res ? res.clientes.length+res.ordens.length+res.consultas.length : 0;
-  const tipoCor = {'Nova Ativação':'#3b82f6','Reparo Técnico':'#ef4444','Mudança de Endereço':'#f59e0b','Recolha de Equipamento':'#a78bfa'};
-
-  return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.8)',zIndex:60,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 16px'}} onClick={onClose}>
-      <div style={{width:'100%',maxWidth:680,background:'#0d1526',border:'1px solid rgba(255,255,255,.1)',borderRadius:20,overflow:'hidden'}} onClick={e=>e.stopPropagation()}>
-        <div style={{display:'flex',alignItems:'center',gap:12,padding:'16px 20px',borderBottom:'1px solid rgba(255,255,255,.06)'}}>
-          <Search size={18} color="#a78bfa"/>
-          <input ref={ref} type="text" placeholder="Buscar clientes, OS, consultas Serasa..." value={q} onChange={e=>setQ(e.target.value)}
-            style={{flex:1,background:'transparent!important',border:'none!important',outline:'none',fontSize:16,color:'white',fontFamily:'inherit'}}/>
-          <button onClick={onClose} style={{background:'rgba(255,255,255,.06)',border:'none',borderRadius:8,padding:'4px 8px',cursor:'pointer',color:'#64748b',fontSize:11,fontWeight:700}}>ESC</button>
-        </div>
-        <div className="scroll" style={{maxHeight:480,overflowY:'auto'}}>
-          {!res && <p style={{padding:'32px',textAlign:'center',color:'#334155',fontSize:13}}>Digite ao menos 2 caracteres para pesquisar…</p>}
-          {res && total===0 && <p style={{padding:'32px',textAlign:'center',color:'#334155',fontSize:13}}>Nenhum resultado encontrado para "<b style={{color:'#64748b'}}>{q}</b>"</p>}
-          {res && res.clientes.length>0 && (
-            <div style={{padding:'12px 0'}}>
-              <p style={{fontSize:9,fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'.1em',padding:'0 20px 8px'}}>Clientes ({res.clientes.length})</p>
-              {res.clientes.map(c=>(
-                <button key={c.id} onClick={()=>onNav('clientes',c)} style={{width:'100%',padding:'10px 20px',background:'none',border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:12,textAlign:'left',transition:'background .15s'}}
-                  onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.04)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
-                  <div style={{width:36,height:36,borderRadius:10,background:'rgba(59,130,246,.15)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><Users size={16} color="#3b82f6"/></div>
-                  <div style={{flex:1}}>
-                    <p style={{fontSize:13,fontWeight:700,color:'white',margin:'0 0 2px'}}>{c.nome}</p>
-                    <p style={{fontSize:11,color:'#475569',margin:0,fontFamily:'monospace'}}>{c.serial} · {c.cto}/P{c.porta}</p>
-                  </div>
-                  <span style={{fontSize:10,padding:'2px 8px',borderRadius:6,background:c.status==='Ativo'?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:c.status==='Ativo'?'#4ade80':'#f87171',fontWeight:700}}>{c.status}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {res && res.ordens.length>0 && (
-            <div style={{padding:'12px 0',borderTop:'1px solid rgba(255,255,255,.04)'}}>
-              <p style={{fontSize:9,fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'.1em',padding:'0 20px 8px'}}>Ordens de Serviço ({res.ordens.length})</p>
-              {res.ordens.map(o=>(
-                <button key={o.id} onClick={()=>onNav('suporte')} style={{width:'100%',padding:'10px 20px',background:'none',border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:12,textAlign:'left',transition:'background .15s'}}
-                  onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.04)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
-                  <div style={{width:36,height:36,borderRadius:10,background:`${tipoCor[o.tipo]||'#64748b'}18`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><Wrench size={16} color={tipoCor[o.tipo]||'#64748b'}/></div>
-                  <div style={{flex:1}}>
-                    <p style={{fontSize:13,fontWeight:700,color:'white',margin:'0 0 2px'}}>{o.nome}</p>
-                    <p style={{fontSize:11,color:'#475569',margin:0}}>{o.tipo} · {o.cto?`${o.cto}/P${o.porta}`:'Sem CTO'}</p>
-                  </div>
-                  <OSStatusBadge status={o.status}/>
-                </button>
-              ))}
-            </div>
-          )}
-          {res && res.consultas.length>0 && (
-            <div style={{padding:'12px 0',borderTop:'1px solid rgba(255,255,255,.04)'}}>
-              <p style={{fontSize:9,fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'.1em',padding:'0 20px 8px'}}>Consultas Serasa ({res.consultas.length})</p>
-              {res.consultas.map(c=>(
-                <button key={c.id} onClick={()=>onNav('serasa')} style={{width:'100%',padding:'10px 20px',background:'none',border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:12,textAlign:'left',transition:'background .15s'}}
-                  onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.04)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
-                  <div style={{width:36,height:36,borderRadius:10,background:'rgba(167,139,250,.12)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><FileSearch size={16} color="#a78bfa"/></div>
-                  <div style={{flex:1}}>
-                    <p style={{fontSize:13,fontWeight:700,color:'white',margin:'0 0 2px'}}>{c.nome}</p>
-                    <p style={{fontSize:11,color:'#475569',margin:0,fontFamily:'monospace'}}>{c.tipoDoc}: {c.documento}</p>
-                  </div>
-                  <ResultBadge r={c.resultado}/>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  APP PRINCIPAL
-// ═════════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const toast = useToast?.() || (() => {});
+  const [telaAtual, setTelaAtual] = useState('menu');
+  
+  // Estados: Clientes
+  const [clientes, setClientes] = useState([]);
+  const [buscaCliente, setBuscaCliente] = useState('');
+  const [filtroStatusCliente, setFiltroStatusCliente] = useState('Todos');
+  const [editandoClienteId, setEditandoClienteId] = useState(null);
+  const [cliente, setCliente] = useState({ nome: '', login: '', serial: '', cto: '', porta: '', observacao: '', status: 'Ativo' });
 
-  const [tela, setTela] = useState('menu');
-  const [buscaGlobalAberta, setBuscaGlobalAberta] = useState(false);
-  const [historicoCliente, setHistoricoCliente] = useState(null);
+  // Estados: Suporte (Ordens de Serviço)
+  const [ordens, setOrdens] = useState([]);
+  const [buscaOrdem, setBuscaOrdem] = useState('');
+  const [filtroStatusOrdem, setFiltroStatusOrdem] = useState('Todos');
+  const [filtroTipoOrdem, setFiltroTipoOrdem] = useState('Todos Tipos');
+  const [editandoOrdemId, setEditandoOrdemId] = useState(null);
+  const [ordem, setOrdem] = useState({ 
+    nome: '', serial: '', cto: '', porta: '', tipo: 'Nova Ativação', dataAgendada: '', relato: '', status: 'Pendente' 
+  });
 
-  // ── Dados ─────────────────────────────────────────────────────────────────
-  const [clientes,  setClientes]  = useState([]);
-  const [ordens,    setOrdens]    = useState([]);
-  const [bobinas,   setBobinas]   = useState([]);
-  const [consultas, setConsultas] = useState([]);
-  const [estoque,   setEstoque]   = useState([]);
+  // Estados: Bobinas
+  const [bobinas, setBobinas] = useState([]);
+  const [bobina, setBobina] = useState({ identificacao: '', tipo: 'Drop 1FO', total: '', usado: '', marca: '' });
 
-  // ── Forms ─────────────────────────────────────────────────────────────────
-  const [editClienteId, setEditClienteId] = useState(null);
-  const [editOrdemId,   setEditOrdemId]   = useState(null);
-  const [editConsId,    setEditConsId]    = useState(null);
-  const [editEstId,     setEditEstId]     = useState(null);
-
-  const [fCliente, setFCliente] = useState({nome:'',login:'',serial:'',cto:'',porta:'',observacao:'',status:'Ativo'});
-  const [fOrdem,   setFOrdem]   = useState({nome:'',serial:'',cto:'',porta:'',tipo:'Nova Ativação',dataAgendada:'',relato:'',status:'Pendente'});
-  const [fCons,    setFCons]    = useState({nome:'',documento:'',tipoDoc:'CPF',score:'',resultado:'Pendente Análise',restricoes:'',observacao:'',dataConsulta:new Date().toISOString().split('T')[0],telefone:'',convertido:false});
-  const [fEst,     setFEst]     = useState({nome:'',categoria:'ONU',quantidade:'',minimo:'',observacao:''});
-
-  // ── Filtros ───────────────────────────────────────────────────────────────
-  const [fBCliente, setFBCliente] = useState('');
-  const [fSCliente, setFSCliente] = useState('Todos');
-  const [fBOrdem,   setFBOrdem]   = useState('');
-  const [fSOrdem,   setFSOrdem]   = useState('Todos');
-  const [fTOrdem,   setFTOrdem]   = useState('Todos Tipos');
-  const [fBCons,    setFBCons]    = useState('');
-  const [fRCons,    setFRCons]    = useState('Todos');
-  const [fTCons,    setFTCons]    = useState('Todos');
-  const [fBEst,     setFBEst]     = useState('');
-  const [fCatEst,   setFCatEst]   = useState('Todos');
-  const [fMesFinanc,setFMesFinanc]= useState('');
-
-  // ── Firebase ──────────────────────────────────────────────────────────────
+  // Buscar Dados (Clientes, Suporte e Bobinas) - Carregamento Direto
   useEffect(() => {
-    const subs = [
-      onSnapshot(query(collection(db,'clientes'),  orderBy('nome','asc')),       s=>setClientes(s.docs.map(d=>({id:d.id,...d.data()})))),
-      onSnapshot(query(collection(db,'suporte'),   orderBy('dataAgendada','asc')),s=>setOrdens(s.docs.map(d=>({id:d.id,...d.data()})))),
-      onSnapshot(query(collection(db,'bobinas'),   orderBy('identificacao','asc')),s=>setBobinas(s.docs.map(d=>({id:d.id,...d.data()})))),
-      onSnapshot(query(collection(db,'consultas'), orderBy('dataConsulta','desc')),s=>setConsultas(s.docs.map(d=>({id:d.id,...d.data()})))),
-      onSnapshot(query(collection(db,'estoque'),   orderBy('nome','asc')),        s=>setEstoque(s.docs.map(d=>({id:d.id,...d.data()})))),
-    ];
-    return ()=>subs.forEach(u=>u());
-  },[]);
+    // Buscar Clientes
+    const qClientes = query(collection(db, "clientes"), orderBy("nome", "asc"));
+    const unsubClientes = onSnapshot(qClientes, (snapshot) => {
+      setClientes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
 
-  // keyboard shortcut busca global
-  useEffect(()=>{
-    const h = e => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){ e.preventDefault(); setBuscaGlobalAberta(true); }};
-    window.addEventListener('keydown',h);
-    return ()=>window.removeEventListener('keydown',h);
-  },[]);
+    // Buscar Ordens de Suporte
+    const qOrdens = query(collection(db, "suporte"), orderBy("dataAgendada", "asc"));
+    const unsubOrdens = onSnapshot(qOrdens, (snapshot) => {
+      setOrdens(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
 
-  // ── CRUD Clientes ─────────────────────────────────────────────────────────
+    // Buscar Bobinas
+    const qBobinas = query(collection(db, "bobinas"), orderBy("identificacao", "asc"));
+    const unsubBobinas = onSnapshot(qBobinas, (snapshot) => {
+      setBobinas(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return () => { unsubClientes(); unsubOrdens(); unsubBobinas(); };
+  }, []);
+
+  // --- FUNÇÕES DE CLIENTES ---
   const salvarCliente = async () => {
-    if(!fCliente.nome||!fCliente.serial) return toast('Nome e Serial obrigatórios','error');
-    if(!editClienteId){
-      if(clientes.find(c=>c.serial?.toLowerCase()===fCliente.serial.toLowerCase()&&c.status==='Ativo')) return toast(`Serial ${fCliente.serial} já em uso!`,'error');
-      if(clientes.find(c=>c.nome?.toLowerCase()===fCliente.nome.toLowerCase()&&c.status==='Ativo')) return toast(`Nome já cadastrado como Ativo!`,'error');
+    if (!cliente.nome || !cliente.serial) return alert("Nome e Serial são obrigatórios!");
+    
+    if (!editandoClienteId) {
+      const serialEmUso = clientes.find(c => c.serial.toLowerCase() === cliente.serial.toLowerCase() && c.status === 'Ativo');
+      if (serialEmUso) return alert(`⚠️ BLOQUEADO: O Serial (SN) ${cliente.serial} já está em uso pelo assinante ATIVO: ${serialEmUso.nome}!`);
+      const nomeEmUso = clientes.find(c => c.nome.toLowerCase() === cliente.nome.toLowerCase() && c.status === 'Ativo');
+      if (nomeEmUso) return alert(`⚠️ BLOQUEADO: Já existe um assinante ATIVO com o nome ${cliente.nome}!`);
     }
-    try{
-      if(editClienteId){ await updateDoc(doc(db,'clientes',editClienteId),fCliente); setEditClienteId(null); toast('Cliente atualizado'); }
-      else { await addDoc(collection(db,'clientes'),{...fCliente,dataCadastro:new Date().toISOString()}); toast('Cliente cadastrado!'); }
-      setFCliente({nome:'',login:'',serial:'',cto:'',porta:'',observacao:'',status:'Ativo'});
-    }catch{ toast('Erro ao salvar','error'); }
-  };
-  const toggleStatusCliente = async(id,s)=>updateDoc(doc(db,'clientes',id),{status:s==='Ativo'?'Desativado':'Ativo'});
-  const excluirCliente = async id=>{ if(window.confirm('Apagar cliente?')){ await deleteDoc(doc(db,'clientes',id)); toast('Cliente removido','warn'); }};
 
-  // ── CRUD Ordens ───────────────────────────────────────────────────────────
+    try {
+      if (editandoClienteId) {
+        await updateDoc(doc(db, "clientes", editandoClienteId), { ...cliente });
+        setEditandoClienteId(null);
+      } else {
+        await addDoc(collection(db, "clientes"), { ...cliente, dataCadastro: new Date().toISOString() });
+      }
+      setCliente({ nome: '', login: '', serial: '', cto: '', porta: '', observacao: '', status: 'Ativo' });
+    } catch (e) { alert("Erro ao guardar dados."); }
+  };
+
+  const alternarStatusCliente = async (id, statusAtual) => {
+    const novoStatus = statusAtual === 'Ativo' ? 'Desativado' : 'Ativo';
+    await updateDoc(doc(db, "clientes", id), { status: novoStatus });
+  };
+
+  const excluirCliente = async (id) => {
+    if (window.confirm("Deseja realmente apagar este registo?")) await deleteDoc(doc(db, "clientes", id));
+  };
+
+  // --- FUNÇÕES DE SUPORTE (OS) ---
   const salvarOrdem = async () => {
-    if(!fOrdem.nome||!fOrdem.tipo) return toast('Nome e Tipo obrigatórios','error');
-    try{
-      if(editOrdemId){ await updateDoc(doc(db,'suporte',editOrdemId),fOrdem); setEditOrdemId(null); toast('OS atualizada'); }
-      else { await addDoc(collection(db,'suporte'),{...fOrdem,dataCriacao:new Date().toISOString()}); toast('OS criada!'); }
-      setFOrdem({nome:'',serial:'',cto:'',porta:'',tipo:'Nova Ativação',dataAgendada:'',relato:'',status:'Pendente'});
-    }catch{ toast('Erro ao salvar','error'); }
-  };
-  const avancarStatusOS = async(id,s)=>{
-    const p={'Pendente':'Concluído','Concluído':'Pago','Pago':'Pendente'};
-    await updateDoc(doc(db,'suporte',id),{status:p[s]});
-    toast(p[s]==='Pago'?'✓ Marcado como Pago!':p[s]==='Concluído'?'Serviço concluído':'Reaberto como Pendente','info');
-  };
-  const excluirOrdem = async id=>{ if(window.confirm('Apagar OS?')){ await deleteDoc(doc(db,'suporte',id)); toast('OS removida','warn'); }};
-
-  // ── CRUD Bobinas ──────────────────────────────────────────────────────────
-  const salvarBobina = async()=>{
-    if(!fOrdem.identificacao&&!bobinas) return;
-    if(!fBObina?.identificacao) return;
-  };
-  // Estado separado pra bobina
-  const [fBObina, setFBObina] = useState({identificacao:'',tipo:'Drop 1FO',total:'',usado:'',marca:''});
-  const salvarBobin = async()=>{
-    if(!fBObina.identificacao||!fBObina.total) return toast('Identificação e Total obrigatórios','error');
-    try{
-      await addDoc(collection(db,'bobinas'),{...fBObina,total:Number(fBObina.total),usado:Number(fBObina.usado||0),dataEntrada:new Date().toISOString()});
-      setFBObina({identificacao:'',tipo:'Drop 1FO',total:'',usado:'',marca:''});
-      toast('Bobina cadastrada!');
-    }catch{ toast('Erro ao salvar','error'); }
-  };
-  const registrarUso = async(id,usado,val)=>{
-    if(!val||isNaN(val)||Number(val)<=0) return toast('Valor inválido','error');
-    await updateDoc(doc(db,'bobinas',id),{usado:Number(usado)+Number(val)});
-    toast(`${val}m descontados`);
-  };
-  const excluirBobina = async id=>{ if(window.confirm('Apagar bobina?')){ await deleteDoc(doc(db,'bobinas',id)); toast('Bobina removida','warn'); }};
-
-  // ── CRUD Consultas Serasa ─────────────────────────────────────────────────
-  const salvarCons = async()=>{
-    if(!fCons.nome||!fCons.documento) return toast('Nome e Documento obrigatórios','error');
-    try{
-      if(editConsId){ await updateDoc(doc(db,'consultas',editConsId),{...fCons,score:fCons.score?Number(fCons.score):null}); setEditConsId(null); toast('Consulta atualizada'); }
-      else { await addDoc(collection(db,'consultas'),{...fCons,score:fCons.score?Number(fCons.score):null,dataCriacao:new Date().toISOString()}); toast('Consulta registrada!'); }
-      setFCons({nome:'',documento:'',tipoDoc:'CPF',score:'',resultado:'Pendente Análise',restricoes:'',observacao:'',dataConsulta:new Date().toISOString().split('T')[0],telefone:'',convertido:false});
-    }catch{ toast('Erro ao salvar','error'); }
-  };
-  const toggleConvertido = async(id,v)=>{ await updateDoc(doc(db,'consultas',id),{convertido:!v}); toast(!v?'Marcado como convertido':'Conversão removida'); };
-  const excluirCons = async id=>{ if(window.confirm('Apagar consulta?')){ await deleteDoc(doc(db,'consultas',id)); toast('Consulta removida','warn'); }};
-
-  // ── CRUD Estoque ──────────────────────────────────────────────────────────
-  const salvarEst = async()=>{
-    if(!fEst.nome||!fEst.quantidade) return toast('Nome e Quantidade obrigatórios','error');
-    try{
-      if(editEstId){ await updateDoc(doc(db,'estoque',editEstId),{...fEst,quantidade:Number(fEst.quantidade),minimo:Number(fEst.minimo||0)}); setEditEstId(null); toast('Item atualizado'); }
-      else { await addDoc(collection(db,'estoque'),{...fEst,quantidade:Number(fEst.quantidade),minimo:Number(fEst.minimo||0),dataCadastro:new Date().toISOString()}); toast('Item cadastrado!'); }
-      setFEst({nome:'',categoria:'ONU',quantidade:'',minimo:'',observacao:''});
-    }catch{ toast('Erro ao salvar','error'); }
-  };
-  const ajustarEst = async(id,qtdAtual,delta)=>{
-    const nova = Math.max(0,Number(qtdAtual)+Number(delta));
-    await updateDoc(doc(db,'estoque',id),{quantidade:nova});
-    toast(`Estoque ${delta>0?'aumentado':'reduzido'}: ${nova} unidades`);
-  };
-  const excluirEst = async id=>{ if(window.confirm('Apagar item do estoque?')){ await deleteDoc(doc(db,'estoque',id)); toast('Item removido','warn'); }};
-
-  // ── Financeiro (derivado das OS) ──────────────────────────────────────────
-  const ordensComValor = ordens.map(o=>({...o,valor:VALORES_OS[o.tipo]||0}));
-
-  const filtrarMes = os => {
-    if(!fMesFinanc) return os;
-    return os.filter(o=>o.dataAgendada?.startsWith(fMesFinanc)||o.dataCriacao?.startsWith(fMesFinanc));
-  };
-  const osFinanc = filtrarMes(ordensComValor);
-
-  const finStats = {
-    totalRecebido: osFinanc.filter(o=>o.status==='Pago').reduce((a,o)=>a+o.valor,0),
-    totalPendente: osFinanc.filter(o=>o.status==='Pendente').reduce((a,o)=>a+o.valor,0),
-    totalConcluido:osFinanc.filter(o=>o.status==='Concluído').reduce((a,o)=>a+o.valor,0),
-    qtdPago:       osFinanc.filter(o=>o.status==='Pago').length,
-    qtdConcluido:  osFinanc.filter(o=>o.status==='Concluído').length,
-    qtdPendente:   osFinanc.filter(o=>o.status==='Pendente').length,
-    porTipo: Object.entries(VALORES_OS).map(([tipo,val])=>({
-      tipo, val,
-      qtd: osFinanc.filter(o=>o.tipo===tipo).length,
-      pago: osFinanc.filter(o=>o.tipo===tipo&&o.status==='Pago').reduce((a,o)=>a+o.valor,0),
-    })),
+    if (!ordem.nome || !ordem.tipo) return alert("Nome e Tipo de Serviço são obrigatórios!");
+    try {
+      if (editandoOrdemId) {
+        await updateDoc(doc(db, "suporte", editandoOrdemId), { ...ordem });
+        setEditandoOrdemId(null);
+      } else {
+        await addDoc(collection(db, "suporte"), { ...ordem, dataCriacao: new Date().toISOString() });
+      }
+      setOrdem({ nome: '', serial: '', cto: '', porta: '', tipo: 'Nova Ativação', dataAgendada: '', relato: '', status: 'Pendente' });
+      alert("Ordem de Serviço salva com sucesso!");
+    } catch (e) { alert("Erro ao guardar ordem."); }
   };
 
-  // ── Filtros listas ────────────────────────────────────────────────────────
-  const clientesFilt = clientes.filter(c=>{
-    const s=fBCliente.toLowerCase();
-    return (c.nome?.toLowerCase().includes(s)||c.serial?.toLowerCase().includes(s)||c.login?.toLowerCase().includes(s))&&
-           (fSCliente==='Todos'||c.status===fSCliente);
-  }).sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR',{sensitivity:'base'}));
+  const alterarStatusOrdem = async (id, statusAtual) => {
+    const proximoStatus = {
+      'Pendente': 'Concluído',
+      'Concluído': 'Pago',
+      'Pago': 'Pendente'
+    };
+    await updateDoc(doc(db, "suporte", id), { status: proximoStatus[statusAtual] });
+  };
 
-  const ordensFilt = ordens.filter(o=>{
-    const s=fBOrdem.toLowerCase();
-    return (o.nome?.toLowerCase().includes(s)||o.serial?.toLowerCase().includes(s)||o.cto?.toLowerCase().includes(s))&&
-           (fSOrdem==='Todos'||o.status===fSOrdem)&&(fTOrdem==='Todos Tipos'||o.tipo===fTOrdem);
+  const excluirOrdem = async (id) => {
+    if (window.confirm("Apagar esta Ordem de Serviço?")) await deleteDoc(doc(db, "suporte", id));
+  };
+
+  // --- FUNÇÕES DE BOBINAS ---
+  const salvarBobina = async () => {
+    if (!bobina.identificacao || !bobina.total) return alert("Identificação e Total de Metros são obrigatórios!");
+    try {
+      await addDoc(collection(db, "bobinas"), { ...bobina, total: Number(bobina.total), usado: Number(bobina.usado || 0), dataEntrada: new Date().toISOString() });
+      setBobina({ identificacao: '', tipo: 'Drop 1FO', total: '', usado: '', marca: '' });
+      alert("Bobina registrada no sistema!");
+    } catch (e) { alert("Erro ao guardar bobina."); }
+  };
+
+  // Lógica inteligente de subtração de metragem
+  const registrarUso = async (id, usadoAtual, valorDesconto) => {
+    if (!valorDesconto || isNaN(valorDesconto) || Number(valorDesconto) <= 0) {
+      return alert("Insira um valor de metragem válido para descontar.");
+    }
+    const novoUsado = Number(usadoAtual) + Number(valorDesconto);
+    await updateDoc(doc(db, "bobinas", id), { usado: novoUsado });
+  };
+
+  const excluirBobina = async (id) => {
+    if (window.confirm("Deseja realmente apagar esta bobina do estoque?")) await deleteDoc(doc(db, "bobinas", id));
+  };
+
+  // --- EXPORTAÇÃO ---
+  const exportarRelatorio = (tipo) => {
+    if (tipo === 'excel') {
+      const cabecalho = "Nome,Serial,Login,CTO,Porta,Status,Observacao\n";
+      const dados = clientes.map(c => `"${c.nome}","${c.serial}","${c.login}","${c.cto}","${c.porta}","${c.status}","${c.observacao || ''}"`).join("\n");
+      const blob = new Blob([cabecalho + dados], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `Lumix_Relatorio_${new Date().toLocaleDateString()}.csv`;
+      link.click();
+    } else {
+      const docPDF = new jsPDF();
+      docPDF.setFontSize(18);
+      docPDF.text("LUMIX FIBRA - Relatório Técnico", 14, 20);
+      docPDF.setFontSize(10);
+      docPDF.text(`Gerado em ${new Date().toLocaleDateString()}`, 14, 28);
+      const rows = clientes.map(c => [c.nome, c.serial, c.login, `${c.cto} / P${c.porta}`, c.status]);
+      docPDF.autoTable({ startY: 35, head: [['Assinante', 'Serial (SN)', 'Login', 'CTO/Porta', 'Status']], body: rows, theme: 'grid', headStyles: { fillColor: [30, 64, 175] } });
+      docPDF.save("Relatorio_Lumix_Fibra.pdf");
+    }
+  };
+
+  // --- RENDERIZAÇÃO CONDICIONAL E FILTROS ---
+  const clientesFiltrados = clientes.filter(c => {
+    const search = buscaCliente.toLowerCase();
+    return (c.nome?.toLowerCase().includes(search) || c.serial?.toLowerCase().includes(search) || c.login?.toLowerCase().includes(search)) && 
+           (filtroStatusCliente === 'Todos' || c.status === filtroStatusCliente);
+  }).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' }));
+
+  const ordensFiltradas = ordens.filter(o => {
+    const search = buscaOrdem.toLowerCase();
+    return (o.nome?.toLowerCase().includes(search) || o.serial?.toLowerCase().includes(search) || o.cto?.toLowerCase().includes(search)) &&
+           (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem) &&
+           (filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem);
   });
 
-  const consFilt = consultas.filter(c=>{
-    const s=fBCons.toLowerCase();
-    return (c.nome?.toLowerCase().includes(s)||c.documento?.toLowerCase().includes(s))&&
-           (fRCons==='Todos'||c.resultado===fRCons)&&(fTCons==='Todos'||c.tipoDoc===fTCons);
-  });
+  // --- CONTAGEM DE ITENS ---
+  const contagemOrdens = {
+    'Todos': ordens.filter(o => filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem).length,
+    'Pendente': ordens.filter(o => o.status === 'Pendente' && (filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem)).length,
+    'Concluído': ordens.filter(o => o.status === 'Concluído' && (filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem)).length,
+    'Pago': ordens.filter(o => o.status === 'Pago' && (filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem)).length
+  };
 
-  const estFilt = estoque.filter(e=>{
-    const s=fBEst.toLowerCase();
-    return (e.nome?.toLowerCase().includes(s))&&(fCatEst==='Todos'||e.categoria===fCatEst);
-  });
+  const contagemTipos = {
+    'Todos Tipos': ordens.filter(o => filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem).length,
+    'Nova Ativação': ordens.filter(o => o.tipo === 'Nova Ativação' && (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem)).length,
+    'Reparo Técnico': ordens.filter(o => o.tipo === 'Reparo Técnico' && (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem)).length,
+    'Mudança de Endereço': ordens.filter(o => o.tipo === 'Mudança de Endereço' && (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem)).length,
+    'Recolha de Equipamento': ordens.filter(o => o.tipo === 'Recolha de Equipamento' && (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem)).length
+  };
 
-  // ── Helpers visuais ───────────────────────────────────────────────────────
-  const inp  = {padding:'13px 15px',borderRadius:12,width:'100%',fontSize:14};
-  const fw   = {display:'flex',flexDirection:'column',gap:0};
-  const tipoCor={'Nova Ativação':'#3b82f6','Reparo Técnico':'#ef4444','Mudança de Endereço':'#f59e0b','Recolha de Equipamento':'#a78bfa'};
-  const catCor={'ONU':'#3b82f6','Roteador':'#10b981','Splitter':'#f59e0b','Conector':'#f97316','Cabo':'#a78bfa','Outro':'#64748b'};
-  const btnTab=(on,c)=>({padding:'7px 13px',borderRadius:9,fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',cursor:'pointer',border:'none',display:'flex',alignItems:'center',gap:6,transition:'all .2s',background:on?c:'transparent',color:on?'white':'#64748b'});
-  const btnAcao=(bg,col,bd)=>({padding:7,borderRadius:8,background:bg,border:`1px solid ${bd}`,cursor:'pointer',color:col,display:'flex',alignItems:'center'});
-  const backBtn=(cor,label)=>(
-    <button onClick={()=>setTela('menu')} style={{marginBottom:24,color:cor,fontWeight:700,fontSize:13,display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer'}}>
-      <LayoutDashboard size={15}/>{label||'Voltar ao Painel'}
-    </button>
-  );
-  const secHeader=(icon,label,cor)=>(
-    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:20,paddingBottom:14,borderBottom:'1px solid rgba(255,255,255,.05)'}}>
-      {React.cloneElement(icon,{size:17,color:cor})}
-      <h2 style={{fontSize:14,fontWeight:800,textTransform:'uppercase',letterSpacing:'.07em',margin:0,color:'white'}}>{label}</h2>
-    </div>
-  );
+  const contagemClientes = {
+    'Todos': clientes.length,
+    'Desativado': clientes.filter(c => c.status === 'Desativado').length
+  };
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  RENDER
-  // ═══════════════════════════════════════════════════════════════════════════
   return (
-    <div style={{minHeight:'100vh',padding:'24px 16px 80px',maxWidth:1300,margin:'0 auto'}}>
-      <GlobalStyle/>
-
-      {/* Busca global overlay */}
-      {buscaGlobalAberta && (
-        <BuscaGlobal
-          clientes={clientes} ordens={ordens} consultas={consultas}
-          onClose={()=>setBuscaGlobalAberta(false)}
-          onNav={(t,c)=>{ setTela(t); setBuscaGlobalAberta(false); if(c) setTimeout(()=>setHistoricoCliente(c),200); }}
-        />
-      )}
-
-      {/* Modal histórico */}
-      {historicoCliente && <HistoricoModal cliente={historicoCliente} ordens={ordens} onClose={()=>setHistoricoCliente(null)}/>}
-
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:36,flexWrap:'wrap',gap:12}}>
-        <div onClick={()=>setTela('menu')} style={{cursor:'pointer',display:'flex',alignItems:'center',gap:10}}>
-          <div style={{background:'linear-gradient(135deg,#3b82f6,#6366f1)',padding:8,borderRadius:12,display:'flex'}}>
-            <Wifi size={20} color="white"/>
+    <div className="min-h-screen p-4 md:p-8 text-slate-100 pb-20 overflow-x-hidden">
+      <TailwindStyle />
+      <div className="max-w-6xl mx-auto">
+        
+        {/* HEADER COMUM */}
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
+          <div onClick={() => setTelaAtual('menu')} className="cursor-pointer">
+            <h1 className="text-2xl font-black text-white flex items-center gap-2 uppercase tracking-tighter"><Wifi className="text-blue-500" /> Lumix Fibra</h1>
+            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Painel Administrativo v2.0</p>
           </div>
-          <div>
-            <h1 style={{fontSize:20,fontWeight:800,color:'white',margin:0,letterSpacing:'-.5px'}}>Lumix Fibra</h1>
-            <p style={{fontSize:9,fontWeight:700,color:'#475569',margin:0,letterSpacing:'.15em',textTransform:'uppercase'}}>Painel Administrativo v2.2</p>
-          </div>
-        </div>
-        <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          <button onClick={()=>setBuscaGlobalAberta(true)}
-            style={{display:'flex',alignItems:'center',gap:8,padding:'9px 16px',background:'rgba(16,24,40,.8)',border:'1px solid rgba(255,255,255,.08)',borderRadius:12,cursor:'pointer',color:'#64748b',fontSize:12,fontWeight:600,gap:8}}>
-            <Search size={14}/> Busca rápida
-            <span style={{fontSize:10,padding:'1px 6px',borderRadius:5,background:'rgba(255,255,255,.06)',color:'#475569',fontFamily:'monospace'}}>⌘K</span>
-          </button>
-          <div style={{display:'flex',alignItems:'center',gap:8,padding:'9px 14px',background:'rgba(16,24,40,.6)',borderRadius:12,border:'1px solid rgba(255,255,255,.06)'}}>
-            <div style={{width:7,height:7,borderRadius:'50%',background:'#22c55e'}} className="pdot"/>
-            <span style={{fontSize:11,fontWeight:600,color:'#94a3b8'}}>Online</span>
-          </div>
-        </div>
-      </header>
-
-      {/* ═══════════════════════════ MENU ═══════════════════════════════════ */}
-      {tela==='menu' && (
-        <div className="page">
-          {/* Quick stats */}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:10,marginBottom:32}}>
-            {[
-              {label:'Clientes Ativos', val:clientes.filter(c=>c.status==='Ativo').length,   col:'#3b82f6'},
-              {label:'OS Pendentes',    val:ordens.filter(o=>o.status==='Pendente').length,    col:'#f59e0b'},
-              {label:'A Receber',       val:fmt(ordens.filter(o=>o.status==='Concluído').reduce((a,o)=>a+(VALORES_OS[o.tipo]||0),0)), col:'#34d399'},
-              {label:'Recebido Total',  val:fmt(ordens.filter(o=>o.status==='Pago').reduce((a,o)=>a+(VALORES_OS[o.tipo]||0),0)),      col:'#4ade80'},
-              {label:'Alertas Estoque', val:estoque.filter(e=>e.quantidade<=e.minimo).length, col:'#f87171'},
-              {label:'Consultas Serasa',val:consultas.length,                                  col:'#a78bfa'},
-            ].map(({label,val,col})=>(
-              <div key={label} className="stat-card">
-                <p style={{fontSize:9,fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'.08em',margin:'0 0 6px'}}>{label}</p>
-                <p style={{fontSize:22,fontWeight:800,color:col,margin:0,lineHeight:1}}>{val}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Alertas estoque */}
-          {estoque.filter(e=>e.quantidade<=e.minimo).length>0 && (
-            <div style={{marginBottom:24,background:'rgba(239,68,68,.08)',border:'1px solid rgba(239,68,68,.2)',borderRadius:16,padding:'14px 18px',display:'flex',alignItems:'center',gap:12}}>
-              <AlertTriangle size={18} color="#f87171" style={{flexShrink:0}}/>
-              <div style={{flex:1}}>
-                <p style={{fontSize:12,fontWeight:700,color:'#f87171',margin:'0 0 2px',textTransform:'uppercase',letterSpacing:'.06em'}}>Alerta de Estoque Baixo</p>
-                <p style={{fontSize:12,color:'#94a3b8',margin:0}}>{estoque.filter(e=>e.quantidade<=e.minimo).map(e=>`${e.nome} (${e.quantidade} un.)`).join(' · ')}</p>
-              </div>
-              <button onClick={()=>setTela('estoque')} style={{fontSize:11,padding:'6px 12px',borderRadius:8,background:'rgba(239,68,68,.15)',color:'#f87171',border:'1px solid rgba(239,68,68,.3)',cursor:'pointer',fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',flexShrink:0}}>Ver Estoque</button>
+          <div className="flex items-center gap-3 glass p-2 px-4 rounded-2xl border border-white/5">
+            <div className="text-right hidden sm:block">
+              <div className="text-sm font-bold truncate max-w-[150px]">Equipe Técnica</div>
+              <div className="text-[9px] text-green-400 uppercase font-black">Sistema Aberto e Online</div>
             </div>
-          )}
+          </div>
+        </header>
 
-          {/* Cards módulos */}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:16}}>
-            {[
-              {id:'clientes',  icon:<Users size={32}/>,       label:'Clientes & CTO',      desc:'Portas, seriais e histórico.',   cor:'#3b82f6', bgCor:'rgba(59,130,246,.1)',  bd:'rgba(59,130,246,.2)'},
-              {id:'suporte',   icon:<Wrench size={32}/>,      label:'Ativação & Suporte',  desc:'Ordens de serviço e reparos.',   cor:'#f59e0b', bgCor:'rgba(245,158,11,.1)', bd:'rgba(245,158,11,.2)'},
-              {id:'financeiro',icon:<Banknote size={32}/>,    label:'Financeiro',           desc:'Cobranças, recebimentos e resumo.', cor:'#34d399',bgCor:'rgba(52,211,153,.1)',bd:'rgba(52,211,153,.2)'},
-              {id:'estoque',   icon:<Boxes size={32}/>,       label:'Estoque',              desc:'Equipamentos e materiais.',      cor:'#fb923c', bgCor:'rgba(251,146,60,.1)', bd:'rgba(251,146,60,.2)'},
-              {id:'bobinas',   icon:<Database size={32}/>,    label:'Bobinas de Fibra',     desc:'Metragem e controle de campo.',  cor:'#10b981', bgCor:'rgba(16,185,129,.1)', bd:'rgba(16,185,129,.2)'},
-              {id:'serasa',    icon:<FileSearch size={32}/>,  label:'Consulta Serasa',      desc:'CPF/CNPJ e análise de crédito.', cor:'#a78bfa', bgCor:'rgba(167,139,250,.1)',bd:'rgba(167,139,250,.2)'},
-            ].map(m=>(
-              <button key={m.id} onClick={()=>setTela(m.id)} className="menu-card"
-                style={{background:'rgba(16,24,40,.7)',border:`1px solid ${m.bd}`,borderRadius:20,padding:'28px 22px',textAlign:'left',cursor:'pointer',display:'flex',flexDirection:'column',gap:16}}>
-                <div style={{background:m.bgCor,borderRadius:14,padding:14,width:'fit-content',color:m.cor}}>{m.icon}</div>
-                <div>
-                  <h3 style={{fontSize:16,fontWeight:800,color:'white',margin:'0 0 4px',letterSpacing:'-.3px'}}>{m.label}</h3>
-                  <p style={{fontSize:12,color:'#64748b',margin:0,lineHeight:1.5}}>{m.desc}</p>
+        {/* TELA: MENU PRINCIPAL */}
+        {telaAtual === 'menu' && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 animate-in slide-in-from-bottom-10 duration-500">
+            <button onClick={() => setTelaAtual('clientes')} className="glass p-12 rounded-3xl group hover:border-blue-500/50 transition-all text-center flex flex-col items-center gap-6 shadow-xl">
+              <div className="bg-blue-600/20 p-8 rounded-full text-blue-500 group-hover:bg-blue-600 group-hover:text-white transition-all"><Users size={48} /></div>
+              <h3 className="text-2xl font-black uppercase tracking-tight">Clientes e CTO</h3>
+              <p className="text-slate-400 text-sm">Gerencie portas, seriais e localização técnica.</p>
+            </button>
+
+            <button onClick={() => setTelaAtual('suporte')} className="glass p-12 rounded-3xl group hover:border-orange-500/50 transition-all text-center flex flex-col items-center gap-6 shadow-xl">
+              <div className="bg-orange-600/20 p-8 rounded-full text-orange-500 group-hover:bg-orange-600 group-hover:text-white transition-all"><Wrench size={48} /></div>
+              <h3 className="text-2xl font-black uppercase tracking-tight text-white">Ativação e Suporte</h3>
+              <p className="text-slate-400 text-sm">Ordens de serviço, novas instalações e reparos.</p>
+            </button>
+
+            <button onClick={() => setTelaAtual('bobinas')} className="glass p-12 rounded-3xl group hover:border-emerald-500/50 transition-all text-center flex flex-col items-center gap-6 shadow-xl">
+              <div className="bg-emerald-600/20 p-8 rounded-full text-emerald-500 group-hover:bg-emerald-600 group-hover:text-white transition-all"><Database size={48} /></div>
+              <h3 className="text-2xl font-black uppercase tracking-tight text-white">Bobinas</h3>
+              <p className="text-slate-400 text-sm">Controle de estoque e metragem de fibra óptica.</p>
+            </button>
+          </div>
+        )}
+
+        {/* TELA: BOBINAS */}
+        {telaAtual === 'bobinas' && (
+          <div className="animate-in fade-in duration-700">
+            <button onClick={() => setTelaAtual('menu')} className="mb-6 text-emerald-400 font-bold flex items-center gap-2 hover:text-emerald-300 transition-colors"><LayoutDashboard size={18} /> Voltar ao Painel</button>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              
+              {/* Formulário Bobinas */}
+              <div className="glass p-8 rounded-3xl mb-10 shadow-2xl border border-emerald-500/10 lg:col-span-1 h-fit">
+                <div className="flex items-center gap-2 mb-8 border-b border-white/5 pb-4">
+                  <Plus className="text-emerald-500" />
+                  <h2 className="text-xl font-black uppercase tracking-tight">Nova Bobina</h2>
                 </div>
-                <div style={{display:'flex',alignItems:'center',gap:5,color:m.cor,fontSize:11,fontWeight:700,letterSpacing:'.05em',textTransform:'uppercase'}}>
-                  Acessar <ChevronRight size={13}/>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════ FINANCEIRO ═════════════════════════════ */}
-      {tela==='financeiro' && (
-        <div className="page">
-          {backBtn('#34d399')}
-
-          {/* Filtro mês */}
-          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:24,flexWrap:'wrap'}}>
-            <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(16,24,40,.7)',border:'1px solid rgba(255,255,255,.07)',borderRadius:12,padding:'8px 14px'}}>
-              <Calendar size={14} color="#64748b"/>
-              <input type="month" value={fMesFinanc} onChange={e=>setFMesFinanc(e.target.value)}
-                style={{background:'transparent!important',border:'none!important',color:'#94a3b8',fontSize:13,cursor:'pointer',outline:'none'}}/>
-              {fMesFinanc&&<button onClick={()=>setFMesFinanc('')} style={{background:'none',border:'none',cursor:'pointer',color:'#475569',display:'flex',padding:0}}><X size={13}/></button>}
-            </div>
-            <span style={{fontSize:11,color:'#475569'}}>
-              {fMesFinanc ? `Exibindo: ${new Date(fMesFinanc+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}` : 'Exibindo: Todos os períodos'}
-            </span>
-          </div>
-
-          {/* Stats financeiros */}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:12,marginBottom:28}}>
-            {[
-              {label:'Total Recebido',  val:fmt(finStats.totalRecebido),  col:'#4ade80', sub:`${finStats.qtdPago} OS pagas`},
-              {label:'A Receber',       val:fmt(finStats.totalConcluido), col:'#fbbf24', sub:`${finStats.qtdConcluido} OS concluídas`},
-              {label:'Em Aberto',       val:fmt(finStats.totalPendente),  col:'#f87171', sub:`${finStats.qtdPendente} OS pendentes`},
-              {label:'Potencial Total', val:fmt(finStats.totalRecebido+finStats.totalConcluido+finStats.totalPendente), col:'#a78bfa', sub:'soma de todas'},
-            ].map(({label,val,col,sub})=>(
-              <div key={label} className="stat-card">
-                <p style={{fontSize:9,fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'.08em',margin:'0 0 8px'}}>{label}</p>
-                <p style={{fontSize:22,fontWeight:800,color:col,margin:'0 0 4px',lineHeight:1}}>{val}</p>
-                <p style={{fontSize:10,color:'#334155',margin:0}}>{sub}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Tabela por tipo */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:24}}>
-            {/* Por tipo de OS */}
-            <div className="glass" style={{borderRadius:20,padding:22,borderColor:'rgba(52,211,153,.1)'}}>
-              {secHeader(<BarChart2/>, 'Receita por Tipo de Serviço','#34d399')}
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                {finStats.porTipo.map(({tipo,val,qtd,pago})=>{
-                  const cor = tipoCor[tipo]||'#64748b';
-                  return (
-                    <div key={tipo} style={{display:'flex',flexDirection:'column',gap:6}}>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                        <div style={{display:'flex',alignItems:'center',gap:8}}>
-                          <div style={{width:3,height:32,borderRadius:2,background:cor}}/>
-                          <div>
-                            <p style={{fontSize:12,fontWeight:700,color:'white',margin:'0 0 1px'}}>{tipo}</p>
-                            <p style={{fontSize:10,color:'#475569',margin:0}}>{qtd} OS · {fmt(val)} cada</p>
-                          </div>
-                        </div>
-                        <div style={{textAlign:'right'}}>
-                          <p style={{fontSize:14,fontWeight:800,color:'#4ade80',margin:'0 0 1px'}}>{fmt(pago)}</p>
-                          <p style={{fontSize:10,color:'#334155',margin:0}}>recebido</p>
-                        </div>
-                      </div>
+                
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Identificação</label>
+                    <input type="text" placeholder="Ex: Bobina 01 (Carro do João)" className="p-4 rounded-2xl" value={bobina.identificacao} onChange={e => setBobina({...bobina, identificacao: e.target.value})} />
+                  </div>
+                  
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Tipo de Cabo</label>
+                    <select className="p-4 rounded-2xl font-bold cursor-pointer" value={bobina.tipo} onChange={e => setBobina({...bobina, tipo: e.target.value})}>
+                      <option>Drop 1FO</option>
+                      <option>AS-80 6FO</option>
+                      <option>AS-80 12FO</option>
+                    </select>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Total (m)</label>
+                      <input type="number" placeholder="Ex: 1000" className="p-4 rounded-2xl" value={bobina.total} onChange={e => setBobina({...bobina, total: e.target.value})} />
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* OS com valor + status */}
-            <div className="glass" style={{borderRadius:20,padding:22,borderColor:'rgba(255,255,255,.05)'}}>
-              {secHeader(<Receipt/>, 'Últimas OS com Valor','#34d399')}
-              <div style={{display:'flex',flexDirection:'column',gap:8}} className="scroll" style={{maxHeight:300,overflowY:'auto',display:'flex',flexDirection:'column',gap:8}}>
-                {osFinanc.slice().reverse().slice(0,12).map(o=>(
-                  <div key={o.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 12px',background:'rgba(8,12,20,.5)',borderRadius:10,border:'1px solid rgba(255,255,255,.04)'}}>
-                    <div style={{flex:1}}>
-                      <p style={{fontSize:12,fontWeight:700,color:'white',margin:'0 0 2px'}}>{o.nome}</p>
-                      <span style={{fontSize:9,padding:'1px 6px',borderRadius:4,background:`${tipoCor[o.tipo]||'#64748b'}18`,color:tipoCor[o.tipo]||'#64748b',fontWeight:700,textTransform:'uppercase'}}>{o.tipo}</span>
-                    </div>
-                    <div style={{textAlign:'right',flexShrink:0}}>
-                      <p style={{fontSize:14,fontWeight:800,margin:'0 0 3px',color:o.status==='Pago'?'#4ade80':o.status==='Concluído'?'#fbbf24':'#64748b'}}>{fmt(o.valor)}</p>
-                      <OSStatusBadge status={o.status}/>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Já Usado (m)</label>
+                      <input type="number" placeholder="Ex: 0" className="p-4 rounded-2xl" value={bobina.usado} onChange={e => setBobina({...bobina, usado: e.target.value})} />
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Exportar PDF financeiro */}
-          <button onClick={()=>{
-            const d=new jsPDF();
-            d.setFontSize(14); d.text('LUMIX FIBRA — Relatório Financeiro',14,16);
-            d.setFontSize(9); d.text(`Gerado: ${new Date().toLocaleString('pt-BR')}`,14,22);
-            d.autoTable({startY:28,head:[['Cliente','Tipo','Status','Valor','Data']],
-              body:osFinanc.map(o=>[o.nome,o.tipo,o.status,fmt(o.valor),o.dataAgendada?new Date(o.dataAgendada).toLocaleDateString('pt-BR'):'—']),
-              theme:'grid',headStyles:{fillColor:[5,150,105]},bodyStyles:{fontSize:8}});
-            d.save('Financeiro_Lumix.pdf');
-          }} style={{display:'flex',alignItems:'center',gap:8,padding:'11px 18px',borderRadius:12,background:'rgba(52,211,153,.1)',color:'#34d399',border:'1px solid rgba(52,211,153,.25)',cursor:'pointer',fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em'}}>
-            <Printer size={15}/> Exportar Relatório PDF
-          </button>
-        </div>
-      )}
-
-      {/* ═══════════════════════════ ESTOQUE ════════════════════════════════ */}
-      {tela==='estoque' && (
-        <div className="page">
-          {backBtn('#fb923c')}
-
-          <div style={{display:'grid',gridTemplateColumns:'300px 1fr',gap:20,alignItems:'start'}}>
-            {/* Form estoque */}
-            <div className="glass" style={{borderRadius:20,padding:22,borderColor:'rgba(251,146,60,.12)',position:'sticky',top:16}}>
-              {secHeader(<Package/>, editEstId?'Editar Item':'Novo Item de Estoque','#fb923c')}
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                <div style={fw}><p className="fl">Nome do Item</p><input style={inp} placeholder="Ex: ONU ZTE F601" value={fEst.nome} onChange={e=>setFEst({...fEst,nome:e.target.value})}/></div>
-                <div style={fw}><p className="fl">Categoria</p>
-                  <select style={inp} value={fEst.categoria} onChange={e=>setFEst({...fEst,categoria:e.target.value})}>
-                    <option>ONU</option><option>Roteador</option><option>Splitter</option><option>Conector</option><option>Cabo</option><option>Outro</option>
-                  </select>
-                </div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                  <div style={fw}><p className="fl">Quantidade</p><input style={inp} type="number" min="0" placeholder="0" value={fEst.quantidade} onChange={e=>setFEst({...fEst,quantidade:e.target.value})}/></div>
-                  <div style={fw}><p className="fl">Mínimo</p><input style={inp} type="number" min="0" placeholder="Alerta abaixo de" value={fEst.minimo} onChange={e=>setFEst({...fEst,minimo:e.target.value})}/></div>
-                </div>
-                <div style={fw}><p className="fl">Observação</p><textarea style={{...inp,height:60,resize:'none'}} placeholder="Modelo, cor, especificação..." value={fEst.observacao} onChange={e=>setFEst({...fEst,observacao:e.target.value})}/></div>
-                <button onClick={salvarEst} className="btn" style={{background:'linear-gradient(135deg,#c2410c,#fb923c)',color:'white'}}>
-                  <Save size={16}/>{editEstId?'Atualizar':'Cadastrar Item'}
-                </button>
-                {editEstId&&<button onClick={()=>{setEditEstId(null);setFEst({nome:'',categoria:'ONU',quantidade:'',minimo:'',observacao:''}); }} style={{background:'none',border:'none',color:'#475569',fontSize:11,fontWeight:700,textTransform:'uppercase',cursor:'pointer'}}>Cancelar</button>}
-              </div>
-            </div>
-
-            {/* Lista estoque */}
-            <div className="glass" style={{borderRadius:20,overflow:'hidden',borderColor:'rgba(255,255,255,.05)'}}>
-              {/* Toolbar */}
-              <div style={{padding:'16px 20px',borderBottom:'1px solid rgba(255,255,255,.05)',display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
-                <div style={{position:'relative',flex:1,minWidth:180}}>
-                  <Search size={14} color="#475569" style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)'}}/>
-                  <input style={{...inp,paddingLeft:36}} placeholder="Buscar item..." value={fBEst} onChange={e=>setFBEst(e.target.value)}/>
-                </div>
-                <div style={{display:'flex',gap:3,padding:4,background:'rgba(8,12,20,.6)',borderRadius:10,border:'1px solid rgba(255,255,255,.05)'}}>
-                  {['Todos','ONU','Roteador','Splitter','Conector','Cabo','Outro'].map(c=>(
-                    <button key={c} onClick={()=>setFCatEst(c)} style={btnTab(fCatEst===c,catCor[c]||'#fb923c')}>{c}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Stats estoque */}
-              <div style={{padding:'12px 20px',borderBottom:'1px solid rgba(255,255,255,.04)',display:'flex',gap:16,flexWrap:'wrap'}}>
-                {[
-                  {label:'Total Itens',val:estoque.length,col:'#fb923c'},
-                  {label:'Alertas',val:estoque.filter(e=>e.quantidade<=e.minimo).length,col:'#f87171'},
-                  {label:'Categorias',val:new Set(estoque.map(e=>e.categoria)).size,col:'#94a3b8'},
-                ].map(({label,val,col})=>(
-                  <div key={label} style={{display:'flex',gap:8,alignItems:'center'}}>
-                    <span style={{fontSize:18,fontWeight:800,color:col}}>{val}</span>
-                    <span style={{fontSize:10,color:'#475569',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em'}}>{label}</span>
+                  
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Marca/Fornecedor (Opcional)</label>
+                    <input type="text" placeholder="Ex: Furukawa, Prysmian..." className="p-4 rounded-2xl" value={bobina.marca} onChange={e => setBobina({...bobina, marca: e.target.value})} />
                   </div>
-                ))}
-              </div>
-
-              <div style={{padding:'14px 18px',display:'flex',flexDirection:'column',gap:8}} className="scroll" style={{padding:'14px 18px',display:'flex',flexDirection:'column',gap:8,overflowY:'auto',maxHeight:520}}>
-                {estFilt.map(e=>{
-                  const cor = catCor[e.categoria]||'#64748b';
-                  const baixo = e.quantidade <= e.minimo;
-                  return (
-                    <div key={e.id} className="row-hover" style={{background:'rgba(8,12,20,.5)',borderRadius:14,padding:'14px 16px',border:`1px solid ${baixo?'rgba(239,68,68,.2)':'rgba(255,255,255,.04)'}`,borderLeft:`3px solid ${baixo?'#ef4444':cor}`,display:'flex',alignItems:'center',gap:14}}>
-                      <div style={{width:44,height:44,borderRadius:12,background:`${cor}15`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                        <Package size={20} color={cor}/>
-                      </div>
-                      <div style={{flex:1}}>
-                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:3,flexWrap:'wrap'}}>
-                          <p style={{fontSize:14,fontWeight:700,color:'white',margin:0}}>{e.nome}</p>
-                          <span style={{fontSize:9,padding:'2px 7px',borderRadius:5,background:`${cor}15`,color:cor,border:`1px solid ${cor}25`,fontWeight:700,textTransform:'uppercase'}}>{e.categoria}</span>
-                          {baixo&&<span style={{fontSize:9,padding:'2px 7px',borderRadius:5,background:'rgba(239,68,68,.12)',color:'#f87171',border:'1px solid rgba(239,68,68,.25)',fontWeight:700,display:'flex',alignItems:'center',gap:3}}><AlertTriangle size={10}/>Baixo</span>}
-                        </div>
-                        {e.observacao&&<p style={{fontSize:11,color:'#64748b',margin:0,fontStyle:'italic'}}>{e.observacao}</p>}
-                        {e.minimo>0&&<p style={{fontSize:10,color:'#334155',margin:'3px 0 0'}}>Mínimo: {e.minimo} un.</p>}
-                      </div>
-                      {/* Ajustar quantidade */}
-                      <div style={{display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
-                        <button onClick={()=>ajustarEst(e.id,e.quantidade,-1)} style={{width:30,height:30,borderRadius:8,background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.2)',cursor:'pointer',color:'#f87171',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,fontWeight:700}}>−</button>
-                        <div style={{textAlign:'center',minWidth:48}}>
-                          <p style={{fontSize:20,fontWeight:800,color:baixo?'#f87171':'white',margin:0,lineHeight:1}}>{e.quantidade}</p>
-                          <p style={{fontSize:9,color:'#334155',margin:0,textTransform:'uppercase',letterSpacing:'.06em'}}>unid.</p>
-                        </div>
-                        <button onClick={()=>ajustarEst(e.id,e.quantidade,1)} style={{width:30,height:30,borderRadius:8,background:'rgba(34,197,94,.1)',border:'1px solid rgba(34,197,94,.2)',cursor:'pointer',color:'#4ade80',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,fontWeight:700}}>+</button>
-                      </div>
-                      {/* Ações */}
-                      <div style={{display:'flex',gap:4,flexShrink:0}}>
-                        <button onClick={()=>{setEditEstId(e.id);setFEst({nome:e.nome,categoria:e.categoria,quantidade:e.quantidade,minimo:e.minimo||0,observacao:e.observacao||''});window.scrollTo({top:0,behavior:'smooth'});}} style={btnAcao('rgba(255,255,255,.04)','#64748b','rgba(255,255,255,.06)')}><Edit size={14}/></button>
-                        <button onClick={()=>excluirEst(e.id)} style={btnAcao('rgba(239,68,68,.07)','#f87171','rgba(239,68,68,.15)')}><Trash2 size={14}/></button>
-                      </div>
-                    </div>
-                  );
-                })}
-                {estFilt.length===0&&<div style={{textAlign:'center',padding:'40px 0',color:'#334155',fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',border:'1px dashed rgba(255,255,255,.06)',borderRadius:14}}>Nenhum item cadastrado</div>}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════ BOBINAS ════════════════════════════════ */}
-      {tela==='bobinas' && (
-        <div className="page">
-          {backBtn('#10b981')}
-          <div style={{display:'grid',gridTemplateColumns:'300px 1fr',gap:20,alignItems:'start'}}>
-            <div className="glass" style={{borderRadius:20,padding:22,borderColor:'rgba(16,185,129,.12)',position:'sticky',top:16}}>
-              {secHeader(<Plus/>,'Nova Bobina','#10b981')}
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                <div style={fw}><p className="fl">Identificação</p><input style={inp} placeholder="Bobina 01 — João" value={fBObina.identificacao} onChange={e=>setFBObina({...fBObina,identificacao:e.target.value})}/></div>
-                <div style={fw}><p className="fl">Tipo de Cabo</p><select style={inp} value={fBObina.tipo} onChange={e=>setFBObina({...fBObina,tipo:e.target.value})}><option>Drop 1FO</option><option>AS-80 6FO</option><option>AS-80 12FO</option></select></div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                  <div style={fw}><p className="fl">Total (m)</p><input style={inp} type="number" placeholder="1000" value={fBObina.total} onChange={e=>setFBObina({...fBObina,total:e.target.value})}/></div>
-                  <div style={fw}><p className="fl">Usado (m)</p><input style={inp} type="number" placeholder="0" value={fBObina.usado} onChange={e=>setFBObina({...fBObina,usado:e.target.value})}/></div>
-                </div>
-                <div style={fw}><p className="fl">Marca</p><input style={inp} placeholder="Furukawa..." value={fBObina.marca} onChange={e=>setFBObina({...fBObina,marca:e.target.value})}/></div>
-                <button onClick={salvarBobin} className="btn" style={{background:'linear-gradient(135deg,#059669,#10b981)',color:'white'}}><Save size={16}/>Registrar Bobina</button>
-              </div>
-            </div>
-            <div className="glass" style={{borderRadius:20,padding:22,borderColor:'rgba(255,255,255,.05)'}}>
-              {secHeader(<Layers/>,'Estoque em Campo','#10b981')}
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                {bobinas.map(b=>{
-                  const rest=b.total-b.usado, perc=Math.min((b.usado/b.total)*100,100);
-                  const barC=perc>90?'#ef4444':perc>75?'#f59e0b':'#10b981';
-                  return (
-                    <div key={b.id} style={{background:'rgba(8,12,20,.5)',borderRadius:14,padding:'16px',border:'1px solid rgba(255,255,255,.04)',borderLeft:'3px solid #10b981'}}>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
-                        <div>
-                          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
-                            <h3 style={{fontSize:13,fontWeight:700,color:'white',margin:0,textTransform:'uppercase'}}>{b.identificacao}</h3>
-                            <span style={{fontSize:9,padding:'1px 7px',borderRadius:5,background:'rgba(16,185,129,.12)',color:'#34d399',border:'1px solid rgba(16,185,129,.2)',fontWeight:700}}>{b.tipo}</span>
-                          </div>
-                          <p style={{fontSize:10,color:'#475569',margin:0,fontFamily:'monospace',textTransform:'uppercase'}}>Marca: {b.marca||'N/A'}</p>
-                        </div>
-                        <div style={{textAlign:'right',display:'flex',alignItems:'center',gap:8}}>
-                          <div><p style={{fontSize:20,fontWeight:800,color:'#10b981',margin:0,lineHeight:1}}>{rest}<small style={{fontSize:10,fontWeight:500,color:'#475569'}}>m</small></p><p style={{fontSize:9,color:'#475569',margin:'2px 0 0',textTransform:'uppercase',letterSpacing:'.06em'}}>restantes</p></div>
-                          <button onClick={()=>excluirBobina(b.id)} style={btnAcao('rgba(239,68,68,.07)','#f87171','rgba(239,68,68,.15)')}><Trash2 size={13}/></button>
-                        </div>
-                      </div>
-                      <div style={{display:'flex',justifyContent:'space-between',marginBottom:5}}><span style={{fontSize:9,color:'#475569',fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em'}}>Usado: {b.usado}m ({perc.toFixed(1)}%)</span></div>
-                      <div className="progress-bar" style={{marginBottom:12}}><div style={{height:'100%',width:`${perc}%`,background:barC,borderRadius:3,transition:'width .6s ease'}}/></div>
-                      <div style={{display:'flex',alignItems:'center',gap:8,background:'rgba(255,255,255,.02)',padding:'9px 12px',borderRadius:10,border:'1px solid rgba(255,255,255,.04)'}}>
-                        <span style={{fontSize:10,color:'#64748b',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em',flexShrink:0}}>Descontar (m):</span>
-                        <input id={`d-${b.id}`} type="number" placeholder="120" style={{flex:1,padding:'6px 10px',borderRadius:8,fontSize:13,textAlign:'center',fontWeight:700}}/>
-                        <button onClick={()=>{const el=document.getElementById(`d-${b.id}`);if(el?.value){registrarUso(b.id,b.usado,el.value);el.value='';}}} style={{padding:'6px 14px',borderRadius:8,background:'#059669',color:'white',border:'none',cursor:'pointer',fontSize:11,fontWeight:800,textTransform:'uppercase',flexShrink:0}}>OK</button>
-                      </div>
-                    </div>
-                  );
-                })}
-                {bobinas.length===0&&<div style={{textAlign:'center',padding:'40px 0',color:'#334155',fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',border:'1px dashed rgba(255,255,255,.06)',borderRadius:14}}>Nenhuma bobina</div>}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════ SUPORTE ════════════════════════════════ */}
-      {tela==='suporte' && (
-        <div className="page">
-          {backBtn('#f59e0b')}
-          <div className="glass" style={{borderRadius:20,padding:22,marginBottom:20,borderColor:'rgba(245,158,11,.1)'}}>
-            {secHeader(<Wrench/>,editOrdemId?'Editar OS':'Nova Ordem de Serviço','#f59e0b')}
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12}}>
-              <div style={fw}><p className="fl">Nome do Cliente</p><input style={inp} placeholder="Nome completo..." value={fOrdem.nome} onChange={e=>setFOrdem({...fOrdem,nome:e.target.value})}/></div>
-              <div style={fw}><p className="fl">Serial (SN ONU)</p><input style={{...inp,fontFamily:'monospace'}} placeholder="ZTEG..." value={fOrdem.serial} onChange={e=>setFOrdem({...fOrdem,serial:e.target.value})}/></div>
-              <div style={fw}><p className="fl">CTO / Porta</p><div style={{display:'grid',gridTemplateColumns:'1fr 56px',gap:8}}><input style={inp} placeholder="CTO..." value={fOrdem.cto} onChange={e=>setFOrdem({...fOrdem,cto:e.target.value})}/><input style={{...inp,textAlign:'center',fontWeight:800}} placeholder="P" value={fOrdem.porta} onChange={e=>setFOrdem({...fOrdem,porta:e.target.value})}/></div></div>
-              <div style={fw}><p className="fl">Tipo de Serviço</p><select style={inp} value={fOrdem.tipo} onChange={e=>setFOrdem({...fOrdem,tipo:e.target.value})}><option>Nova Ativação</option><option>Reparo Técnico</option><option>Mudança de Endereço</option><option>Recolha de Equipamento</option></select></div>
-              <div style={fw}><p className="fl">Data Agendada</p><input style={inp} type="date" value={fOrdem.dataAgendada} onChange={e=>setFOrdem({...fOrdem,dataAgendada:e.target.value})}/></div>
-              <div style={{...fw,gridColumn:'1/-1'}}><p className="fl">Relato</p><textarea style={{...inp,height:68,resize:'none'}} placeholder="Descreva o problema..." value={fOrdem.relato} onChange={e=>setFOrdem({...fOrdem,relato:e.target.value})}/></div>
-              {/* Valor previsto */}
-              <div style={{gridColumn:'1/-1',padding:'10px 14px',background:'rgba(52,211,153,.06)',border:'1px solid rgba(52,211,153,.15)',borderRadius:10,display:'flex',alignItems:'center',gap:10}}>
-                <DollarSign size={14} color="#34d399"/>
-                <span style={{fontSize:12,color:'#94a3b8'}}>Valor previsto para este serviço:</span>
-                <span style={{fontSize:16,fontWeight:800,color:'#4ade80'}}>{fmt(VALORES_OS[fOrdem.tipo]||0)}</span>
-              </div>
-              <button onClick={salvarOrdem} className="btn" style={{gridColumn:'1/-1',background:'linear-gradient(135deg,#d97706,#f59e0b)',color:'white'}}><ClipboardList size={16}/>{editOrdemId?'Atualizar OS':'Gerar OS'}</button>
-              {editOrdemId&&<button onClick={()=>{setEditOrdemId(null);setFOrdem({nome:'',serial:'',cto:'',porta:'',tipo:'Nova Ativação',dataAgendada:'',relato:'',status:'Pendente'});}} style={{gridColumn:'1/-1',background:'none',border:'none',color:'#475569',fontSize:11,fontWeight:700,textTransform:'uppercase',cursor:'pointer'}}>Cancelar</button>}
-            </div>
-          </div>
-
-          {/* Lista OS */}
-          <div className="glass" style={{borderRadius:20,overflow:'hidden',borderColor:'rgba(255,255,255,.05)'}}>
-            <div style={{padding:'16px 20px',borderBottom:'1px solid rgba(255,255,255,.05)'}}>
-              <div style={{position:'relative',marginBottom:10}}><Search size={14} color="#475569" style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)'}}/>
-                <input style={{...inp,paddingLeft:36}} placeholder="Buscar OS..." value={fBOrdem} onChange={e=>setFBOrdem(e.target.value)}/></div>
-              <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-                <div style={{display:'flex',gap:3,padding:4,background:'rgba(8,12,20,.6)',borderRadius:10,border:'1px solid rgba(255,255,255,.05)'}}>
-                  {['Todos','Pendente','Concluído','Pago'].map(s=>(
-                    <button key={s} onClick={()=>setFSOrdem(s)} style={btnTab(fSOrdem===s,'#d97706')}>
-                      {s}<span style={{fontSize:9,padding:'1px 5px',borderRadius:4,background:fSOrdem===s?'rgba(255,255,255,.2)':'rgba(255,255,255,.05)',color:fSOrdem===s?'white':'#475569'}}>{s==='Todos'?ordens.length:ordens.filter(o=>o.status===s).length}</span>
-                    </button>
-                  ))}
-                </div>
-                <div style={{display:'flex',gap:3,padding:4,background:'rgba(8,12,20,.6)',borderRadius:10,border:'1px solid rgba(255,255,255,.05)'}}>
-                  {['Todos Tipos','Nova Ativação','Reparo Técnico','Mudança de Endereço','Recolha de Equipamento'].map(t=>(
-                    <button key={t} onClick={()=>setFTOrdem(t)} style={btnTab(fTOrdem===t,'#4f46e5')}>
-                      {t==='Todos Tipos'?'Todos':t.split(' ')[0]}<span style={{fontSize:9,padding:'1px 5px',borderRadius:4,background:fTOrdem===t?'rgba(255,255,255,.2)':'rgba(255,255,255,.05)',color:fTOrdem===t?'white':'#475569'}}>{t==='Todos Tipos'?ordens.length:ordens.filter(o=>o.tipo===t).length}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div style={{padding:'12px 16px',display:'flex',flexDirection:'column',gap:8,overflowY:'auto',maxHeight:520}} className="scroll">
-              {ordensFilt.map(o=>{
-                const cor=tipoCor[o.tipo]||'#64748b';
-                const diasStr = o.dataAgendada ? (()=>{ const diff=Math.ceil((new Date(o.dataAgendada)-new Date())/(1000*60*60*24)); return diff<0?`Atrasado ${Math.abs(diff)}d`:diff===0?'Hoje':diff===1?'Amanhã':`Em ${diff}d`; })() : null;
-                const diasCor = o.dataAgendada ? (()=>{ const diff=Math.ceil((new Date(o.dataAgendada)-new Date())/(1000*60*60*24)); return diff<0?'#f87171':diff<=2?'#fbbf24':'#64748b'; })() : '#64748b';
-                return (
-                  <div key={o.id} className="row-hover" style={{background:'rgba(8,12,20,.5)',borderRadius:14,padding:'14px 16px',border:'1px solid rgba(255,255,255,.04)',borderLeft:`3px solid ${cor}`,display:'flex',justifyContent:'space-between',gap:12,alignItems:'flex-start'}}>
-                    <div style={{flex:1}}>
-                      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}}>
-                        <span style={{fontSize:9,padding:'2px 7px',borderRadius:5,background:`${cor}18`,color:cor,border:`1px solid ${cor}25`,fontWeight:700,textTransform:'uppercase'}}>{o.tipo}</span>
-                        <h3 style={{fontSize:14,fontWeight:700,color:'white',margin:0}}>{o.nome}</h3>
-                        <span style={{fontSize:12,fontWeight:800,color:'#4ade80'}}>{fmt(VALORES_OS[o.tipo]||0)}</span>
-                      </div>
-                      <div style={{display:'flex',gap:14,fontSize:11,color:'#64748b',flexWrap:'wrap'}}>
-                        <span style={{display:'flex',alignItems:'center',gap:3}}><Wifi size={11} color="#3b82f6"/>{o.cto?`${o.cto}/P${o.porta}`:'Sem CTO'}</span>
-                        {o.serial&&<span style={{fontFamily:'monospace'}}>SN: {o.serial}</span>}
-                        {diasStr&&<span style={{display:'flex',alignItems:'center',gap:3,color:diasCor,fontWeight:700}}><CalendarClock size={11}/>{diasStr}</span>}
-                      </div>
-                      {o.relato&&<div style={{marginTop:6,fontSize:11,background:'rgba(255,255,255,.02)',border:'1px solid rgba(255,255,255,.04)',borderRadius:7,padding:'5px 9px',color:'#94a3b8',display:'flex',gap:5}}><Info size={11} style={{flexShrink:0,marginTop:1}}/>{o.relato}</div>}
-                    </div>
-                    <div style={{display:'flex',flexDirection:'column',gap:5,alignItems:'flex-end',minWidth:130}}>
-                      <button onClick={()=>avancarStatusOS(o.id,o.status)} style={{width:'100%',padding:'7px 10px',borderRadius:9,border:`1px solid ${o.status==='Pendente'?'rgba(245,158,11,.3)':o.status==='Concluído'?'rgba(34,197,94,.3)':'rgba(59,130,246,.3)'}`,cursor:'pointer',fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',display:'flex',alignItems:'center',justifyContent:'center',gap:5,transition:'all .15s',background:o.status==='Pendente'?'rgba(245,158,11,.1)':o.status==='Concluído'?'rgba(34,197,94,.1)':'rgba(59,130,246,.1)',color:o.status==='Pendente'?'#fbbf24':o.status==='Concluído'?'#4ade80':'#60a5fa'}}>
-                        {o.status==='Pendente'&&<Clock size={12}/>}{o.status==='Concluído'&&<CheckCircle2 size={12}/>}{o.status==='Pago'&&<DollarSign size={12}/>}{o.status}
-                      </button>
-                      <div style={{display:'flex',gap:4}}>
-                        <button onClick={()=>{setEditOrdemId(o.id);setFOrdem(o);window.scrollTo({top:0,behavior:'smooth'});}} style={btnAcao('rgba(255,255,255,.04)','#64748b','rgba(255,255,255,.06)')}><Edit size={13}/></button>
-                        <button onClick={()=>excluirOrdem(o.id)} style={btnAcao('rgba(239,68,68,.07)','#f87171','rgba(239,68,68,.15)')}><Trash2 size={13}/></button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              {ordensFilt.length===0&&<div style={{textAlign:'center',padding:'40px 0',color:'#334155',fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',border:'1px dashed rgba(255,255,255,.06)',borderRadius:14}}>Nenhuma OS encontrada</div>}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════ SERASA ═════════════════════════════════ */}
-      {tela==='serasa' && (
-        <div className="page">
-          {backBtn('#a78bfa')}
-          <div style={{display:'grid',gridTemplateColumns:'320px 1fr',gap:20,alignItems:'start'}}>
-            {/* Form */}
-            <div className="glass" style={{borderRadius:20,padding:22,borderColor:'rgba(167,139,250,.12)',position:'sticky',top:16}}>
-              {secHeader(<FileSearch/>,editConsId?'Editar Consulta':'Nova Consulta','#a78bfa')}
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                <div style={fw}><p className="fl">Nome</p><input style={inp} placeholder="Nome completo..." value={fCons.nome} onChange={e=>setFCons({...fCons,nome:e.target.value})}/></div>
-                <div style={fw}><p className="fl">Tipo / Documento</p>
-                  <div style={{display:'grid',gridTemplateColumns:'90px 1fr',gap:8}}>
-                    <select style={inp} value={fCons.tipoDoc} onChange={e=>setFCons({...fCons,tipoDoc:e.target.value,documento:''})}><option>CPF</option><option>CNPJ</option></select>
-                    <input style={inp} placeholder={fCons.tipoDoc==='CPF'?'000.000.000-00':'00.000.000/0000-00'} value={fCons.documento} onChange={e=>setFCons({...fCons,documento:fmtDoc(e.target.value,fCons.tipoDoc)})}/>
-                  </div>
-                </div>
-                <div style={fw}><p className="fl">Telefone</p><input style={inp} type="tel" placeholder="(00) 00000-0000" value={fCons.telefone} onChange={e=>setFCons({...fCons,telefone:e.target.value})}/></div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                  <div style={fw}><p className="fl">Score (0–1000)</p><input style={inp} type="number" min="0" max="1000" placeholder="750" value={fCons.score} onChange={e=>setFCons({...fCons,score:e.target.value})}/></div>
-                  <div style={fw}><p className="fl">Resultado</p><select style={inp} value={fCons.resultado} onChange={e=>setFCons({...fCons,resultado:e.target.value})}><option>Aprovado</option><option>Reprovado</option><option>Com Restrições</option><option>Pendente Análise</option></select></div>
-                </div>
-                <div style={fw}><p className="fl">Data da Consulta</p><input style={inp} type="date" value={fCons.dataConsulta} onChange={e=>setFCons({...fCons,dataConsulta:e.target.value})}/></div>
-                <div style={fw}><p className="fl">Restrições</p><textarea style={{...inp,height:60,resize:'none'}} placeholder="Dívidas, protestos..." value={fCons.restricoes} onChange={e=>setFCons({...fCons,restricoes:e.target.value})}/></div>
-                <div style={fw}><p className="fl">Observação</p><textarea style={{...inp,height:50,resize:'none'}} placeholder="Notas internas..." value={fCons.observacao} onChange={e=>setFCons({...fCons,observacao:e.target.value})}/></div>
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',background:'rgba(8,12,20,.5)',borderRadius:10,border:'1px solid rgba(255,255,255,.06)'}}>
-                  <p style={{fontSize:12,fontWeight:700,color:'#94a3b8',margin:0}}>Convertido em Cliente</p>
-                  <button onClick={()=>setFCons({...fCons,convertido:!fCons.convertido})} style={{width:42,height:22,borderRadius:11,border:'none',cursor:'pointer',transition:'background .2s',position:'relative',background:fCons.convertido?'#6366f1':'rgba(255,255,255,.08)'}}>
-                    <span style={{position:'absolute',top:2,left:fCons.convertido?22:2,width:18,height:18,borderRadius:'50%',background:'white',transition:'left .2s',display:'block'}}/>
+                  
+                  <button onClick={salvarBobina} className="bg-emerald-600 text-white p-5 rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-emerald-700 transition-all uppercase tracking-widest mt-2 active:scale-95 shadow-xl shadow-emerald-900/20">
+                    <Save size={22} /> Registrar Bobina
                   </button>
                 </div>
-                <button onClick={salvarCons} className="btn" style={{background:'linear-gradient(135deg,#7c3aed,#6366f1)',color:'white'}}><Save size={16}/>{editConsId?'Atualizar':'Registrar Consulta'}</button>
-                {editConsId&&<button onClick={()=>{setEditConsId(null);setFCons({nome:'',documento:'',tipoDoc:'CPF',score:'',resultado:'Pendente Análise',restricoes:'',observacao:'',dataConsulta:new Date().toISOString().split('T')[0],telefone:'',convertido:false});}} style={{background:'none',border:'none',color:'#475569',fontSize:11,fontWeight:700,textTransform:'uppercase',cursor:'pointer'}}>Cancelar</button>}
+              </div>
+
+              {/* Listagem Bobinas */}
+              <div className="lg:col-span-2 glass rounded-3xl overflow-hidden shadow-2xl border border-white/5 p-6 space-y-4">
+                <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-4">
+                  <Layers className="text-emerald-500" />
+                  <h2 className="text-xl font-black uppercase tracking-tight">Estoque de Fibra em Campo</h2>
+                </div>
+                
+                <div className="grid grid-cols-1 gap-4 custom-scrollbar overflow-y-auto max-h-[600px] pr-2">
+                  {bobinas.map(b => {
+                    const restante = b.total - b.usado;
+                    const perc = Math.min((b.usado / b.total) * 100, 100);
+                    
+                    return (
+                      <div key={b.id} className="bg-slate-900/50 p-6 rounded-2xl border border-white/5 border-l-4 hover:bg-white/5 transition-colors group" style={{borderLeftColor: '#10b981'}}>
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h3 className="text-lg font-bold text-white uppercase">{b.identificacao} <span className="text-[10px] text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded ml-2 border border-emerald-500/20">{b.tipo}</span></h3>
+                            <p className="text-[10px] font-mono text-slate-500 uppercase mt-1 tracking-wider">Marca: {b.marca || 'N/A'}</p>
+                          </div>
+                          <button onClick={() => excluirBobina(b.id)} className="text-slate-500 hover:text-red-500 p-2 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 size={20}/></button>
+                        </div>
+                        
+                        <div className="flex justify-between items-end mb-2 mt-4">
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Gasto Total: {b.usado}m ({perc.toFixed(1)}%)</span>
+                          <span className="text-emerald-400 font-black text-lg">{restante}m <small className="text-slate-500 font-normal uppercase text-[9px] tracking-widest">restantes</small></span>
+                        </div>
+                        
+                        <div className="progress-bar mb-5">
+                          <div className={`h-full transition-all duration-700 ${perc > 90 ? 'bg-red-500' : perc > 75 ? 'bg-yellow-500' : 'bg-emerald-500'}`} style={{ width: `${perc}%` }}></div>
+                        </div>
+
+                        {/* NOVA CAIXA DE DESCONTO INTELIGENTE */}
+                        <div className="mt-4 flex flex-col sm:flex-row items-center justify-between bg-black/20 p-3 rounded-xl border border-white/5 gap-3">
+                           <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2">
+                             <Edit size={12} className="text-emerald-500"/> Descontar Uso da Instalação (m):
+                           </label>
+                           <div className="flex gap-2 w-full sm:w-auto">
+                             <input 
+                              type="number" 
+                              id={`desconto-${b.id}`}
+                              placeholder="Ex: 120"
+                              className="w-full sm:w-28 p-2 text-sm rounded-lg text-center font-black bg-slate-800 text-white border border-white/10 outline-none focus:ring-2 ring-emerald-500 transition-all" 
+                             />
+                             <button 
+                              onClick={() => {
+                                const input = document.getElementById(`desconto-${b.id}`);
+                                if(input.value) {
+                                  registrarUso(b.id, b.usado, input.value);
+                                  input.value = ''; // Limpa a caixa depois de clicar
+                                }
+                              }}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all shadow-lg active:scale-95"
+                             >
+                               OK
+                             </button>
+                           </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {bobinas.length === 0 && <div className="text-center p-12 text-slate-500 text-xs font-black tracking-widest uppercase opacity-50 border border-dashed border-white/10 rounded-2xl">Nenhuma bobina cadastrada</div>}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* TELA: ATIVAÇÃO E SUPORTE */}
+        {telaAtual === 'suporte' && (
+          <div className="animate-in fade-in duration-700">
+            <button onClick={() => setTelaAtual('menu')} className="mb-6 text-orange-400 font-bold flex items-center gap-2 hover:text-orange-300 transition-colors"><LayoutDashboard size={18} /> Voltar ao Menu</button>
+
+            {/* Formulário de OS */}
+            <div className="glass p-8 rounded-3xl mb-10 shadow-2xl border border-orange-500/10">
+              <div className="flex items-center gap-2 mb-8 border-b border-white/5 pb-4">
+                <Wrench className="text-orange-500" />
+                <h2 className="text-xl font-black uppercase tracking-tight">{editandoOrdemId ? "Editar Ordem" : "Nova Ordem de Serviço (OS)"}</h2>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Nome do Cliente / Assinante</label>
+                  <input type="text" placeholder="Nome completo..." className="p-4 rounded-2xl" value={ordem.nome} onChange={e => setOrdem({...ordem, nome: e.target.value})} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Serial (SN ONU)</label>
+                  <input type="text" placeholder="ZTEG..." className="p-4 rounded-2xl font-mono tracking-widest" value={ordem.serial} onChange={e => setOrdem({...ordem, serial: e.target.value})} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">CTO / Porta (P)</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    <input type="text" placeholder="Caixa CTO" className="col-span-3 p-4 rounded-2xl" value={ordem.cto} onChange={e => setOrdem({...ordem, cto: e.target.value})} />
+                    <input type="text" placeholder="P" className="col-span-1 p-4 rounded-2xl text-center font-black" value={ordem.porta} onChange={e => setOrdem({...ordem, porta: e.target.value})} />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Tipo de Serviço</label>
+                  <select className="p-4 rounded-2xl font-bold cursor-pointer" value={ordem.tipo} onChange={e => setOrdem({...ordem, tipo: e.target.value})}>
+                    <option value="Nova Ativação">Nova Ativação</option>
+                    <option value="Reparo Técnico">Reparo Técnico</option>
+                    <option value="Mudança de Endereço">Mudança de Endereço</option>
+                    <option value="Recolha de Equipamento">Recolha de Equipamento</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5 lg:col-span-2">
+                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Data Agendada</label>
+                  <input type="date" className="p-4 rounded-2xl" value={ordem.dataAgendada} onChange={e => setOrdem({...ordem, dataAgendada: e.target.value})} />
+                </div>
+
+                <div className="flex flex-col gap-1.5 md:col-span-2 lg:col-span-3">
+                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Relato do Problema / Observações</label>
+                  <textarea placeholder="Ex: Cliente relata luz LOS vermelha na ONU..." className="p-4 rounded-2xl h-20 resize-none" value={ordem.relato} onChange={e => setOrdem({...ordem, relato: e.target.value})} />
+                </div>
+
+                <button onClick={salvarOrdem} className="md:col-span-2 lg:col-span-3 bg-orange-600 text-white p-5 rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-orange-700 transition-all uppercase tracking-widest mt-2 shadow-xl shadow-orange-900/20 active:scale-95">
+                  <ClipboardList size={22} /> {editandoOrdemId ? "Atualizar OS" : "Gerar Ordem de Serviço"}
+                </button>
+                {editandoOrdemId && <button onClick={() => { setEditandoOrdemId(null); setOrdem({nome:'', serial:'', cto:'', porta:'', tipo:'Nova Ativação', dataAgendada:'', relato:'', status:'Pendente'}); }} className="md:col-span-2 lg:col-span-3 text-slate-500 text-xs font-bold uppercase hover:text-white transition-colors">Cancelar Edição</button>}
               </div>
             </div>
 
-            {/* Lista consultas */}
-            <div className="glass" style={{borderRadius:20,overflow:'hidden',borderColor:'rgba(255,255,255,.05)'}}>
-              <div style={{padding:'16px 20px',borderBottom:'1px solid rgba(255,255,255,.05)'}}>
-                <div style={{position:'relative',marginBottom:10}}><Search size={14} color="#475569" style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)'}}/>
-                  <input style={{...inp,paddingLeft:36}} placeholder="Buscar nome ou documento..." value={fBCons} onChange={e=>setFBCons(e.target.value)}/></div>
-                <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
-                  <div style={{display:'flex',gap:3,padding:4,background:'rgba(8,12,20,.6)',borderRadius:10,border:'1px solid rgba(255,255,255,.05)'}}>
-                    {['Todos','Aprovado','Reprovado','Com Restrições','Pendente Análise'].map(r=>(
-                      <button key={r} onClick={()=>setFRCons(r)} style={btnTab(fRCons===r,'#7c3aed')}>
-                        {r==='Todos'?'Todos':r.split(' ')[0]}<span style={{fontSize:9,padding:'1px 5px',borderRadius:4,background:fRCons===r?'rgba(255,255,255,.2)':'rgba(255,255,255,.05)',color:fRCons===r?'white':'#475569'}}>{r==='Todos'?consultas.length:consultas.filter(c=>c.resultado===r).length}</span>
+            {/* Lista de OS */}
+            <div className="glass rounded-3xl overflow-hidden shadow-2xl border border-white/5">
+              <div className="p-6 bg-slate-800/50 border-b border-white/5 flex flex-col gap-4">
+                
+                {/* Barra de Busca */}
+                <div className="relative w-full">
+                  <Search className="absolute left-4 top-4 text-slate-500" size={20} />
+                  <input type="text" placeholder="Filtrar OS por nome, CTO ou SN..." className="w-full pl-12 p-4 rounded-2xl outline-none" value={buscaOrdem} onChange={e => setBuscaOrdem(e.target.value)} />
+                </div>
+
+                {/* Filtros em Linhas */}
+                <div className="flex flex-col xl:flex-row gap-3">
+                  {/* Status */}
+                  <div className="flex flex-wrap p-1 bg-slate-900 rounded-xl border border-white/5 gap-1">
+                    {['Todos', 'Pendente', 'Concluído', 'Pago'].map(status => (
+                      <button 
+                        key={status} 
+                        onClick={() => setFiltroStatusOrdem(status)} 
+                        className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 transition-all ${filtroStatusOrdem === status ? 'bg-orange-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
+                      >
+                        {status}
+                        <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${filtroStatusOrdem === status ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                          {contagemOrdens[status]}
+                        </span>
                       </button>
                     ))}
                   </div>
-                  <div style={{display:'flex',gap:3,padding:4,background:'rgba(8,12,20,.6)',borderRadius:10,border:'1px solid rgba(255,255,255,.05)'}}>
-                    {['Todos','CPF','CNPJ'].map(t=>(<button key={t} onClick={()=>setFTCons(t)} style={btnTab(fTCons===t,'#4f46e5')}>{t}</button>))}
+
+                  {/* Tipos de Serviço */}
+                  <div className="flex flex-wrap p-1 bg-slate-900 rounded-xl border border-white/5 gap-1">
+                    {['Todos Tipos', 'Nova Ativação', 'Reparo Técnico', 'Mudança de Endereço', 'Recolha de Equipamento'].map(tipo => (
+                      <button 
+                        key={tipo} 
+                        onClick={() => setFiltroTipoOrdem(tipo)} 
+                        className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 transition-all ${filtroTipoOrdem === tipo ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
+                      >
+                        {tipo === 'Todos Tipos' ? 'Todos os Tipos' : tipo}
+                        <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${filtroTipoOrdem === tipo ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                          {contagemTipos[tipo]}
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 </div>
+
               </div>
-              <div style={{padding:'12px 16px',display:'flex',flexDirection:'column',gap:8,overflowY:'auto',maxHeight:520}} className="scroll">
-                {consFilt.map(c=>{
-                  const lc={'Aprovado':'#22c55e','Reprovado':'#ef4444','Com Restrições':'#f59e0b','Pendente Análise':'#64748b'};
-                  const cor=lc[c.resultado]||'#64748b';
-                  return (
-                    <div key={c.id} className="row-hover" style={{background:'rgba(8,12,20,.5)',borderRadius:14,padding:'14px 16px',border:'1px solid rgba(255,255,255,.04)',borderLeft:`3px solid ${cor}`}}>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12}}>
-                        <div style={{display:'flex',gap:12,alignItems:'flex-start',flex:1}}>
-                          {c.score?<ScoreRing score={Number(c.score)} size={52}/>:<div style={{width:52,height:52,borderRadius:'50%',background:'rgba(255,255,255,.03)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><Hash size={16} color="#334155"/></div>}
-                          <div style={{flex:1}}>
-                            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
-                              <h3 style={{fontSize:14,fontWeight:700,color:'white',margin:0}}>{c.nome}</h3>
-                              {c.convertido&&<span style={{fontSize:9,padding:'2px 7px',borderRadius:5,background:'rgba(56,189,248,.12)',color:'#38bdf8',border:'1px solid rgba(56,189,248,.2)',fontWeight:700}}>✓ Convertido</span>}
-                            </div>
-                            <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',marginBottom:6}}>
-                              <ResultBadge r={c.resultado}/>
-                              <span style={{fontSize:11,color:'#475569',fontFamily:'monospace'}}>{c.tipoDoc}: {c.documento}</span>
-                              {c.telefone&&<span style={{fontSize:11,color:'#475569'}}>📞 {c.telefone}</span>}
-                              <span style={{fontSize:11,color:'#475569',display:'flex',alignItems:'center',gap:3}}><Calendar size={11}/>{c.dataConsulta?new Date(c.dataConsulta).toLocaleDateString('pt-BR'):'—'}</span>
-                            </div>
-                            {c.restricoes&&<div style={{fontSize:11,background:'rgba(239,68,68,.06)',border:'1px solid rgba(239,68,68,.12)',borderRadius:7,padding:'5px 9px',color:'#fca5a5',display:'flex',gap:5}}><AlertCircle size={11} style={{flexShrink:0,marginTop:1}}/>{c.restricoes}</div>}
-                          </div>
+
+              <div className="p-6 grid grid-cols-1 gap-4 custom-scrollbar overflow-y-auto max-h-[600px]">
+                {ordensFiltradas.map((o) => (
+                  <div key={o.id} className="bg-slate-900/50 p-6 rounded-2xl border border-white/5 flex flex-col lg:flex-row justify-between gap-6 hover:bg-white/5 transition-colors group">
+                    <div className="flex-1 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest 
+                          ${o.tipo === 'Nova Ativação' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' : 
+                            o.tipo === 'Reparo Técnico' ? 'bg-red-500/20 text-red-400 border border-red-500/20' : 
+                            o.tipo === 'Mudança de Endereço' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' : 
+                            'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
+                          {o.tipo}
+                        </span>
+                        <h3 className="text-lg font-bold text-white uppercase">{o.nome}</h3>
+                      </div>
+                      
+                      <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-400 mt-4">
+                        <div className="flex items-center gap-1.5"><Wifi size={14} className="text-blue-500 shrink-0"/> {o.cto ? `${o.cto} / P${o.porta}` : 'Sem CTO informada'}</div>
+                        {o.serial && <div className="flex items-center gap-1.5 font-mono"><Info size={14} className="text-slate-500 shrink-0"/> SN: {o.serial}</div>}
+                        <div className="flex items-center gap-1.5"><CalendarClock size={14} className="text-slate-500 shrink-0"/> Agendado: {o.dataAgendada ? new Date(o.dataAgendada).toLocaleDateString('pt-BR') : 'Data em aberto'}</div>
+                      </div>
+                      
+                      {o.relato && (
+                        <div className="text-xs bg-black/20 p-4 rounded-xl border border-white/5 text-slate-300 italic mt-3 flex items-start gap-2">
+                          <Info size={14} className="text-orange-400 shrink-0 mt-0.5" />
+                          <span>{o.relato}</span>
                         </div>
-                        <div style={{display:'flex',flexDirection:'column',gap:5,alignItems:'flex-end',flexShrink:0}}>
-                          <button onClick={()=>toggleConvertido(c.id,c.convertido)} style={{fontSize:10,padding:'4px 9px',borderRadius:7,border:'none',cursor:'pointer',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em',transition:'all .15s',background:c.convertido?'rgba(56,189,248,.15)':'rgba(255,255,255,.04)',color:c.convertido?'#38bdf8':'#475569'}}>
-                            {c.convertido?'✓ Cliente':'→ Converter'}
-                          </button>
-                          <div style={{display:'flex',gap:4}}>
-                            <button onClick={()=>{setEditConsId(c.id);setFCons({...c});window.scrollTo({top:0,behavior:'smooth'});}} style={btnAcao('rgba(255,255,255,.04)','#64748b','rgba(255,255,255,.06)')}><Edit size={13}/></button>
-                            <button onClick={()=>excluirCons(c.id)} style={btnAcao('rgba(239,68,68,.07)','#f87171','rgba(239,68,68,.15)')}><Trash2 size={13}/></button>
-                          </div>
-                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex lg:flex-col justify-between items-end gap-4 min-w-[150px]">
+                      <button onClick={() => alterarStatusOrdem(o.id, o.status)} className={`w-full py-3 px-4 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 border transition-all active:scale-95
+                        ${o.status === 'Pendente' ? 'bg-orange-500/10 border-orange-500/50 text-orange-400 hover:bg-orange-500 hover:text-white' : 
+                          o.status === 'Concluído' ? 'bg-green-500/10 border-green-500/50 text-green-400 hover:bg-green-500 hover:text-white' : 
+                          'bg-blue-500/10 border-blue-500/50 text-blue-400 hover:bg-blue-500 hover:text-white'}`}>
+                        {o.status === 'Pendente' && <Clock size={14} />}
+                        {o.status === 'Concluído' && <CheckCircle2 size={14} />}
+                        {o.status === 'Pago' && <DollarSign size={14} />}
+                        {o.status}
+                      </button>
+
+                      <div className="flex gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => { setEditandoOrdemId(o.id); setOrdem(o); window.scrollTo({top: 0, behavior: 'smooth'}); }} className="p-2.5 text-slate-500 hover:text-orange-400 bg-slate-800 rounded-lg hover:bg-slate-700 transition-all"><Edit size={18} /></button>
+                        <button onClick={() => excluirOrdem(o.id)} className="p-2.5 text-slate-500 hover:text-red-500 bg-slate-800 rounded-lg hover:bg-slate-700 transition-all"><Trash2 size={18} /></button>
                       </div>
                     </div>
-                  );
-                })}
-                {consFilt.length===0&&<div style={{textAlign:'center',padding:'40px 0',color:'#334155',fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',border:'1px dashed rgba(255,255,255,.06)',borderRadius:14}}>Nenhuma consulta</div>}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════ CLIENTES ═══════════════════════════════ */}
-      {tela==='clientes' && (
-        <div className="page">
-          {backBtn('#3b82f6')}
-          <div className="glass" style={{borderRadius:20,padding:22,marginBottom:20,borderColor:'rgba(59,130,246,.1)'}}>
-            {secHeader(editClienteId?<Edit/>:<Wifi/>,editClienteId?'Editar Cliente':'Novo Cadastro de Rede','#3b82f6')}
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12}}>
-              <div style={fw}><p className="fl">Assinante</p><input style={inp} placeholder="Nome completo..." value={fCliente.nome} onChange={e=>setFCliente({...fCliente,nome:e.target.value})}/></div>
-              <div style={fw}><p className="fl">Serial (SN ONU)</p><input style={{...inp,fontFamily:'monospace'}} placeholder="ZTEG..." value={fCliente.serial} onChange={e=>setFCliente({...fCliente,serial:e.target.value})}/></div>
-              <div style={fw}><p className="fl">Login PPPoE</p><input style={inp} placeholder="user@lumix..." value={fCliente.login} onChange={e=>setFCliente({...fCliente,login:e.target.value})}/></div>
-              <div style={fw}><p className="fl">CTO / Porta</p><div style={{display:'grid',gridTemplateColumns:'1fr 56px',gap:8}}><input style={inp} placeholder="CTO..." value={fCliente.cto} onChange={e=>setFCliente({...fCliente,cto:e.target.value})}/><input style={{...inp,textAlign:'center',fontWeight:800}} placeholder="P" value={fCliente.porta} onChange={e=>setFCliente({...fCliente,porta:e.target.value})}/></div></div>
-              <div style={{...fw,gridColumn:'1/-1'}}><p className="fl">Observação</p><textarea style={{...inp,height:56,resize:'none'}} placeholder="Sinal, roteador próprio..." value={fCliente.observacao} onChange={e=>setFCliente({...fCliente,observacao:e.target.value})}/></div>
-              <button onClick={salvarCliente} className="btn" style={{gridColumn:'1/-1',background:'linear-gradient(135deg,#1d4ed8,#3b82f6)',color:'white'}}><Save size={16}/>{editClienteId?'Atualizar':'Salvar Cliente'}</button>
-              {editClienteId&&<button onClick={()=>{setEditClienteId(null);setFCliente({nome:'',login:'',serial:'',cto:'',porta:'',observacao:'',status:'Ativo'});}} style={{gridColumn:'1/-1',background:'none',border:'none',color:'#475569',fontSize:11,fontWeight:700,textTransform:'uppercase',cursor:'pointer'}}>Cancelar</button>}
-            </div>
-          </div>
-
-          {/* Lista clientes */}
-          <div className="glass" style={{borderRadius:20,overflow:'hidden',borderColor:'rgba(255,255,255,.05)'}}>
-            <div style={{padding:'16px 20px',borderBottom:'1px solid rgba(255,255,255,.05)',display:'flex',flexWrap:'wrap',gap:10,alignItems:'center'}}>
-              <div style={{position:'relative',flex:1,minWidth:200}}><Search size={14} color="#475569" style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)'}}/>
-                <input style={{...inp,paddingLeft:36}} placeholder="Buscar nome, SN ou login..." value={fBCliente} onChange={e=>setFBCliente(e.target.value)}/></div>
-              <div style={{display:'flex',gap:3,padding:4,background:'rgba(8,12,20,.6)',borderRadius:10,border:'1px solid rgba(255,255,255,.05)'}}>
-                {['Todos','Ativo','Desativado'].map(s=>(
-                  <button key={s} onClick={()=>setFSCliente(s)} style={btnTab(fSCliente===s,s==='Desativado'?'#dc2626':'#1d4ed8')}>
-                    {s}<span style={{fontSize:9,padding:'1px 5px',borderRadius:4,background:fSCliente===s?'rgba(255,255,255,.2)':'rgba(255,255,255,.05)',color:fSCliente===s?'white':'#475569'}}>{s==='Todos'?clientes.length:clientes.filter(c=>c.status===s).length}</span>
-                  </button>
+                  </div>
                 ))}
+                {ordensFiltradas.length === 0 && <div className="text-center p-12 text-slate-500 text-xs font-black tracking-widest uppercase opacity-50 border border-dashed border-white/10 rounded-2xl">Nenhuma OS encontrada para este filtro</div>}
               </div>
-              <button onClick={()=>{ const cab="Nome,Serial,Login,CTO,Porta,Status\n"; const dados=clientes.map(c=>`"${c.nome}","${c.serial}","${c.login}","${c.cto}","${c.porta}","${c.status}"`).join("\n"); const b=new Blob([cab+dados],{type:'text/csv;charset=utf-8;'}); const l=document.createElement("a"); l.href=URL.createObjectURL(b); l.download="Clientes_Lumix.csv"; l.click(); }} style={{display:'flex',alignItems:'center',gap:5,padding:'8px 12px',borderRadius:9,background:'rgba(34,197,94,.08)',color:'#4ade80',border:'1px solid rgba(34,197,94,.18)',cursor:'pointer',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em'}}><Download size={13}/>CSV</button>
-            </div>
-            <div style={{overflowX:'auto'}}>
-              <table style={{width:'100%',borderCollapse:'collapse'}}>
-                <thead><tr style={{background:'rgba(8,12,20,.4)',borderBottom:'1px solid rgba(255,255,255,.05)'}}>
-                  {['Assinante / Detalhes','CTO / Porta','Status / Ações'].map(h=>(
-                    <th key={h} style={{padding:'12px 18px',textAlign:'left',fontSize:9,fontWeight:700,color:'#475569',textTransform:'uppercase',letterSpacing:'.08em'}}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {clientesFilt.map(c=>(
-                    <tr key={c.id} className="row-hover" style={{borderBottom:'1px solid rgba(255,255,255,.03)',opacity:c.status==='Desativado'?.6:1}}>
-                      <td style={{padding:'12px 18px'}}>
-                        {/* Clique no nome abre histórico */}
-                        <button onClick={()=>setHistoricoCliente(c)} style={{background:'none',border:'none',padding:0,cursor:'pointer',textAlign:'left'}}>
-                          <p style={{fontSize:14,fontWeight:700,color:c.status==='Desativado'?'#475569':'#60a5fa',textDecoration:c.status==='Desativado'?'line-through':'underline',textDecorationStyle:'dotted',textDecorationColor:'rgba(96,165,250,.4)',margin:'0 0 3px'}}>{c.nome}</p>
-                        </button>
-                        <p style={{fontSize:10,fontFamily:'monospace',color:'#475569',margin:'0 0 0',textTransform:'uppercase',letterSpacing:'.04em'}}>{c.serial} · {c.login}</p>
-                        {c.observacao&&<p style={{marginTop:3,fontSize:11,color:'#3b82f6',display:'flex',alignItems:'flex-start',gap:3,margin:'4px 0 0'}}><Info size={11} style={{flexShrink:0,marginTop:1}}/>{c.observacao}</p>}
-                      </td>
-                      <td style={{padding:'12px 18px'}}>
-                        <div style={{display:'inline-flex',alignItems:'center',gap:6,background:'rgba(59,130,246,.08)',color:'#60a5fa',padding:'5px 10px',borderRadius:9,fontSize:11,fontWeight:700}}>
-                          <Wifi size={12}/>{c.cto}/P{c.porta}
-                        </div>
-                      </td>
-                      <td style={{padding:'12px 18px'}}>
-                        <div style={{display:'flex',alignItems:'center',gap:5,justifyContent:'flex-end'}}>
-                          <button onClick={()=>toggleStatusCliente(c.id,c.status)} style={{display:'flex',alignItems:'center',gap:4,padding:'5px 10px',borderRadius:7,border:'none',cursor:'pointer',fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em',transition:'all .15s',background:c.status==='Ativo'?'rgba(34,197,94,.1)':'rgba(239,68,68,.1)',color:c.status==='Ativo'?'#4ade80':'#f87171',border:`1px solid ${c.status==='Ativo'?'rgba(34,197,94,.25)':'rgba(239,68,68,.25)'}`}}>
-                            {c.status==='Ativo'?<CheckCircle size={12}/>:<XCircle size={12}/>}{c.status}
-                          </button>
-                          <button onClick={()=>setHistoricoCliente(c)} style={{...btnAcao('rgba(167,139,250,.08)','#a78bfa','rgba(167,139,250,.2)'),fontSize:10,gap:4,padding:'5px 8px'}} title="Ver histórico"><History size={13}/></button>
-                          <button onClick={()=>{setEditClienteId(c.id);setFCliente(c);window.scrollTo({top:0,behavior:'smooth'});}} style={btnAcao('rgba(255,255,255,.04)','#64748b','rgba(255,255,255,.06)')}><Edit size={13}/></button>
-                          <button onClick={()=>excluirCliente(c.id)} style={btnAcao('rgba(239,68,68,.07)','#f87171','rgba(239,68,68,.15)')}><Trash2 size={13}/></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {clientesFilt.length===0&&<tr><td colSpan={3} style={{padding:'40px 0',textAlign:'center',color:'#334155',fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em'}}>Nenhum cliente encontrado</td></tr>}
-                </tbody>
-              </table>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* TELA: CLIENTES E CTO */}
+        {telaAtual === 'clientes' && (
+          <div className="animate-in fade-in duration-700">
+            <button onClick={() => setTelaAtual('menu')} className="mb-6 text-blue-400 font-bold flex items-center gap-2 hover:text-blue-300 transition-colors"><LayoutDashboard size={18} /> Voltar ao Painel</button>
+
+            {/* Formulário de Clientes */}
+            <div className="glass p-8 rounded-3xl mb-10 shadow-2xl border border-white/5">
+              <div className="flex items-center gap-2 mb-8 border-b border-white/5 pb-4">
+                {editandoClienteId ? <Edit className="text-orange-400" /> : <Wifi className="text-blue-500" />}
+                <h2 className="text-xl font-black uppercase tracking-tight">{editandoClienteId ? "Editar Cliente" : "Novo Cadastro de Rede"}</h2>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Assinante</label><input type="text" placeholder="Nome completo..." className="p-4 rounded-2xl" value={cliente.nome} onChange={e => setCliente({...cliente, nome: e.target.value})} /></div>
+                <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Serial (SN ONU)</label><input type="text" placeholder="ZTEG..." className="p-4 rounded-2xl font-mono tracking-widest" value={cliente.serial} onChange={e => setCliente({...cliente, serial: e.target.value})} /></div>
+                <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Login PPPoE</label><input type="text" placeholder="user@lumix..." className="p-4 rounded-2xl" value={cliente.login} onChange={e => setCliente({...cliente, login: e.target.value})} /></div>
+                
+                <div className="flex flex-col gap-1.5 lg:col-span-1">
+                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">CTO / Porta (P)</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    <input type="text" placeholder="Caixa CTO" className="col-span-3 p-4 rounded-2xl" value={cliente.cto} onChange={e => setCliente({...cliente, cto: e.target.value})} />
+                    <input type="text" placeholder="P" className="col-span-1 p-4 rounded-2xl text-center font-black" value={cliente.porta} onChange={e => setCliente({...cliente, porta: e.target.value})} />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Observação Técnica</label><textarea placeholder="Ex: Roteador próprio, sinal -18db..." className="p-4 rounded-2xl h-14 resize-none" value={cliente.observacao} onChange={e => setCliente({...cliente, observacao: e.target.value})} /></div>
+
+                <button onClick={salvarCliente} className="lg:col-span-3 bg-blue-600 text-white p-5 rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-blue-700 transition-all uppercase tracking-widest mt-2 active:scale-95"><Save size={22} /> {editandoClienteId ? "Atualizar Registo" : "Salvar no Sistema"}</button>
+                {editandoClienteId && <button onClick={() => { setEditandoClienteId(null); setCliente({nome:'', login:'', serial:'', cto:'', porta:'', observacao:'', status:'Ativo'}); }} className="lg:col-span-3 text-slate-500 text-xs font-bold uppercase hover:text-white transition-colors">Cancelar Edição</button>}
+              </div>
+            </div>
+
+            {/* Listagem de Clientes */}
+            <div className="glass rounded-3xl overflow-hidden shadow-2xl border border-white/5">
+              <div className="p-6 bg-slate-800/50 border-b border-white/5 flex flex-col lg:flex-row justify-between gap-6">
+                <div className="relative flex-1"><Search className="absolute left-4 top-4 text-slate-500" size={20} /><input type="text" placeholder="Filtrar por nome, SN ou login..." className="w-full pl-12 p-4 rounded-2xl outline-none" value={buscaCliente} onChange={e => setBuscaCliente(e.target.value)} /></div>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <div className="flex p-1 bg-slate-900 rounded-xl border border-white/5 mr-2 gap-1">
+                    {['Todos', 'Desativado'].map(status => (
+                      <button 
+                        key={status} 
+                        onClick={() => setFiltroStatusCliente(status)} 
+                        className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 transition-all ${filtroStatusCliente === status ? (status === 'Desativado' ? 'bg-red-600 text-white shadow-lg' : 'bg-blue-600 text-white shadow-lg') : 'text-slate-500 hover:text-white'}`}
+                      >
+                        {status === 'Desativado' ? 'Desativados' : 'Todos'}
+                        <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${filtroStatusCliente === status ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                          {contagemClientes[status]}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => exportarRelatorio('excel')} className="bg-green-600/20 text-green-400 p-3 rounded-xl hover:bg-green-600 hover:text-white transition-all"><Download size={18} /></button>
+                  <button onClick={() => exportarRelatorio('pdf')} className="bg-red-600/20 text-red-400 p-3 rounded-xl hover:bg-red-600 hover:text-white transition-all"><Printer size={18} /></button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full text-left">
+                  <thead><tr className="bg-slate-900/50 text-slate-500 text-[10px] uppercase font-black tracking-widest border-b border-white/5"><th className="p-6">Assinante / Detalhes</th><th className="p-6">CTO / Porta</th><th className="p-6 text-center">Ações</th></tr></thead>
+                  <tbody className="divide-y divide-white/5">
+                    {clientesFiltrados.map((c) => (
+                      <tr key={c.id} className={`hover:bg-white/5 transition-colors ${c.status === 'Desativado' ? 'bg-red-900/5 opacity-80' : ''}`}>
+                        <td className="p-6"><div className="flex items-center gap-4">
+                          <div className="min-w-0">
+                            <div className={`text-base font-bold truncate ${c.status === 'Desativado' ? 'line-through text-slate-500' : 'text-white'}`}>{c.nome}</div>
+                            <div className="text-[10px] font-mono text-slate-500 uppercase mt-1 tracking-wider">{c.serial} <span className="mx-1">|</span> {c.login}</div>
+                            {c.observacao && <div className="mt-2 text-[11px] italic text-blue-400 flex items-start gap-1 bg-blue-500/5 p-2 rounded-lg border border-blue-500/10"><Info size={12} className="mt-0.5 shrink-0" /> {c.observacao}</div>}
+                          </div>
+                        </div></td>
+                        <td className="p-6"><div className="inline-flex items-center gap-2 bg-blue-600/10 text-blue-400 px-4 py-2 rounded-xl text-xs font-black uppercase"><Wifi size={14} /> {c.cto} <span className="text-slate-600 mx-1">/</span> P{c.porta}</div></td>
+                        <td className="p-6"><div className="flex items-center justify-end gap-2 md:gap-3">
+                           <button onClick={() => alternarStatusCliente(c.id, c.status)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-sm ${c.status === 'Ativo' ? 'bg-green-500/20 text-green-400 hover:bg-green-500 hover:text-white border border-green-500/20' : 'bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white border border-red-500/20'}`}>
+                             {c.status === 'Ativo' ? <CheckCircle size={14} /> : <XCircle size={14} />} {c.status}
+                           </button>
+                           <button onClick={() => { setEditandoClienteId(c.id); setCliente(c); window.scrollTo({top:0, behavior:'smooth'}); }} className="text-slate-500 hover:text-orange-400 p-2 hover:bg-orange-400/10 rounded-lg"><Edit size={20} /></button>
+                           <button onClick={() => excluirCliente(c.id)} className="text-slate-500 hover:text-red-500 p-2 hover:bg-red-500/10 rounded-lg"><Trash2 size={20} /></button>
+                        </div></td>
+                      </tr>
+                    ))}
+                    {clientesFiltrados.length === 0 && <tr><td colSpan="3" className="p-20 text-center text-slate-500 italic uppercase text-xs tracking-widest font-black opacity-30">Nenhum cliente encontrado</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }
-
-// ── Wrapper com Toast ─────────────────────────────────────────────────────────
-function Root() {
-  return <ToastProvider><App/></ToastProvider>;
-}
-export { Root };
