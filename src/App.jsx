@@ -1,4 +1,3 @@
-cat > /home/claude/App.jsx << 'ENDOFFILE'
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
@@ -1129,5 +1128,3 @@ function Root() {
   return <ToastProvider><App/></ToastProvider>;
 }
 export { Root };
-ENDOFFILE
-echo "Done: $(wc -l < /home/claude/App.jsx) lines"
