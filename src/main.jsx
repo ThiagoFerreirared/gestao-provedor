@@ -1,9 +1,9 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { Root } from './App' // Changed this line
+import App from './App'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <Root /> {/* Changed this line */}
+    <App />
   </React.StrictMode>,
 )
