@@ -3,9 +3,11 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { 
   Save, Search, Trash2, Edit, Info, CheckCircle, XCircle, Users, 
-  Download, Printer, Wifi, LayoutDashboard, ClipboardList, MapPin, Phone, 
+  Download, Printer, Wifi, LayoutDashboard, ClipboardList, 
   Wrench, CalendarClock, CheckCircle2, Clock, DollarSign,
-  Database, Layers, Plus // Adicionados para o módulo de Bobinas
+  Database, Layers, Plus, ShieldCheck, ShieldX, ShieldAlert,
+  FileSearch, User, Calendar, AlertCircle, TrendingUp, Hash,
+  BadgeCheck, BadgeX, BadgeMinus, ChevronRight, Star
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
@@ -23,79 +25,302 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// --- FORMATAÇÃO CPF/CNPJ ---
+const formatarCPF = (valor) => {
+  const nums = valor.replace(/\D/g, '').slice(0, 11);
+  return nums
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+};
+
+const formatarCNPJ = (valor) => {
+  const nums = valor.replace(/\D/g, '').slice(0, 14);
+  return nums
+    .replace(/(\d{2})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1/$2')
+    .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
+};
+
+const formatarDocumento = (valor, tipo) => {
+  if (tipo === 'CPF') return formatarCPF(valor);
+  if (tipo === 'CNPJ') return formatarCNPJ(valor);
+  return valor;
+};
+
 // --- COMPONENTE DE ESTILO ---
-const TailwindStyle = () => (
+const GlobalStyle = () => (
   <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&display=swap');
     @import url('https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css');
-    body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
-    .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
-    input, textarea, select { background: rgba(15, 23, 42, 0.6) !important; color: white !important; border: 1px solid rgba(255,255,255,0.1) !important; }
-    input:focus, select:focus, textarea:focus { border-color: #3b82f6 !important; outline: none; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); }
-    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+
+    * { box-sizing: border-box; }
+    body { 
+      background: #080c14; 
+      color: #f0f4ff; 
+      font-family: 'Space Grotesk', 'Inter', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Glassmorphism */
+    .glass { 
+      background: rgba(16, 24, 40, 0.75); 
+      backdrop-filter: blur(16px); 
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.07); 
+    }
+    .glass-dark {
+      background: rgba(8, 12, 20, 0.6);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    /* Inputs */
+    input, textarea, select { 
+      background: rgba(8, 12, 20, 0.8) !important; 
+      color: #e2e8f0 !important; 
+      border: 1px solid rgba(255,255,255,0.1) !important; 
+      transition: all 0.2s ease;
+    }
+    input::placeholder, textarea::placeholder { color: #4a5568 !important; }
+    input:focus, select:focus, textarea:focus { 
+      border-color: rgba(99,102,241,0.6) !important; 
+      outline: none !important; 
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
+      background: rgba(12, 18, 32, 0.9) !important;
+    }
+    option { background: #0f172a; }
+
+    /* Scrollbar */
+    .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-    .progress-bar { height: 8px; border-radius: 4px; background: #334155; overflow: hidden; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+    /* Barra de progresso */
+    .progress-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.05); overflow: hidden; }
+
+    /* Cards de menu */
+    .menu-card {
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .menu-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      border-radius: inherit;
+    }
+    .menu-card:hover { transform: translateY(-4px); }
+    .menu-card:hover::before { opacity: 1; }
+    .menu-card:active { transform: translateY(-2px) scale(0.99); }
+
+    /* Badge de status */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* Linha de tabela */
+    .table-row {
+      transition: background 0.15s ease;
+    }
+    .table-row:hover { background: rgba(255,255,255,0.025); }
+
+    /* Score dial */
+    .score-ring {
+      position: relative;
+      width: 64px;
+      height: 64px;
+    }
+    .score-ring svg { transform: rotate(-90deg); }
+    .score-ring .score-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 14px;
+    }
+
+    /* Animações */
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-page { animation: fadeSlideIn 0.35s ease forwards; }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+    /* Stat cards */
+    .stat-card {
+      background: rgba(16,24,40,0.6);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 18px 20px;
+      transition: all 0.2s ease;
+    }
+    .stat-card:hover {
+      border-color: rgba(255,255,255,0.12);
+      background: rgba(20,30,55,0.7);
+    }
+
+    /* Botão primário */
+    .btn-primary {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 24px;
+      border-radius: 14px;
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      transition: all 0.2s cubic-bezier(0.4,0,0.2,1);
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary:active { transform: scale(0.98); }
+
+    /* Input label */
+    .field-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-left: 4px;
+      margin-bottom: 6px;
+    }
   `}</style>
 );
 
+// --- COMPONENTE SCORE RING ---
+const ScoreRing = ({ score, size = 56 }) => {
+  const radius = 22;
+  const circumference = 2 * Math.PI * radius;
+  const pct = Math.min(Math.max(score / 1000, 0), 1);
+  const strokeDash = pct * circumference;
+  const color = score >= 700 ? '#22c55e' : score >= 500 ? '#f59e0b' : score >= 300 ? '#f97316' : '#ef4444';
+
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="4" />
+        <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke={color} strokeWidth="4"
+          strokeDasharray={`${strokeDash} ${circumference}`} strokeLinecap="round" />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+        <span style={{ fontSize: '11px', fontWeight: 800, color }}>{score}</span>
+      </div>
+    </div>
+  );
+};
+
+// --- BADGE DE RESULTADO ---
+const ResultadoBadge = ({ resultado }) => {
+  const cfg = {
+    'Aprovado':         { bg: 'rgba(34,197,94,0.12)', color: '#4ade80', border: 'rgba(34,197,94,0.3)',  icon: <ShieldCheck size={12}/> },
+    'Reprovado':        { bg: 'rgba(239,68,68,0.12)',  color: '#f87171', border: 'rgba(239,68,68,0.3)',  icon: <ShieldX size={12}/> },
+    'Com Restrições':   { bg: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: 'rgba(251,191,36,0.3)', icon: <ShieldAlert size={12}/> },
+    'Pendente Análise': { bg: 'rgba(148,163,184,0.12)',color: '#94a3b8', border: 'rgba(148,163,184,0.3)',icon: <Clock size={12}/> },
+  };
+  const c = cfg[resultado] || cfg['Pendente Análise'];
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:8,
+      background: c.bg, color: c.color, border:`1px solid ${c.border}`,
+      fontSize:10, fontWeight:700, letterSpacing:'0.05em', textTransform:'uppercase' }}>
+      {c.icon} {resultado}
+    </span>
+  );
+};
+
+// --- COMPONENTE PRINCIPAL ---
 export default function App() {
   const [telaAtual, setTelaAtual] = useState('menu');
-  
-  // Estados: Clientes
+
+  // ---- Estados: Clientes ----
   const [clientes, setClientes] = useState([]);
   const [buscaCliente, setBuscaCliente] = useState('');
   const [filtroStatusCliente, setFiltroStatusCliente] = useState('Todos');
   const [editandoClienteId, setEditandoClienteId] = useState(null);
-  const [cliente, setCliente] = useState({ nome: '', login: '', serial: '', cto: '', porta: '', observacao: '', status: 'Ativo' });
+  const [cliente, setCliente] = useState({ nome:'', login:'', serial:'', cto:'', porta:'', observacao:'', status:'Ativo' });
 
-  // Estados: Suporte (Ordens de Serviço)
+  // ---- Estados: Suporte (OS) ----
   const [ordens, setOrdens] = useState([]);
   const [buscaOrdem, setBuscaOrdem] = useState('');
   const [filtroStatusOrdem, setFiltroStatusOrdem] = useState('Todos');
   const [filtroTipoOrdem, setFiltroTipoOrdem] = useState('Todos Tipos');
   const [editandoOrdemId, setEditandoOrdemId] = useState(null);
-  const [ordem, setOrdem] = useState({ 
-    nome: '', serial: '', cto: '', porta: '', tipo: 'Nova Ativação', dataAgendada: '', relato: '', status: 'Pendente' 
+  const [ordem, setOrdem] = useState({ nome:'', serial:'', cto:'', porta:'', tipo:'Nova Ativação', dataAgendada:'', relato:'', status:'Pendente' });
+
+  // ---- Estados: Bobinas ----
+  const [bobinas, setBobinas] = useState([]);
+  const [bobina, setBobina] = useState({ identificacao:'', tipo:'Drop 1FO', total:'', usado:'', marca:'' });
+
+  // ---- Estados: Consultas Serasa ----
+  const [consultas, setConsultas] = useState([]);
+  const [buscaConsulta, setBuscaConsulta] = useState('');
+  const [filtroResultado, setFiltroResultado] = useState('Todos');
+  const [filtroTipoDoc, setFiltroTipoDoc] = useState('Todos');
+  const [editandoConsultaId, setEditandoConsultaId] = useState(null);
+  const [consulta, setConsulta] = useState({
+    nome: '',
+    documento: '',
+    tipoDoc: 'CPF',
+    score: '',
+    resultado: 'Pendente Análise',
+    restricoes: '',
+    observacao: '',
+    dataConsulta: new Date().toISOString().split('T')[0],
+    telefone: '',
+    convertido: false,
   });
 
-  // Estados: Bobinas
-  const [bobinas, setBobinas] = useState([]);
-  const [bobina, setBobina] = useState({ identificacao: '', tipo: 'Drop 1FO', total: '', usado: '', marca: '' });
-
-  // Buscar Dados (Clientes, Suporte e Bobinas) - Carregamento Direto
+  // ---- Carregamento do Firebase ----
   useEffect(() => {
-    // Buscar Clientes
     const qClientes = query(collection(db, "clientes"), orderBy("nome", "asc"));
-    const unsubClientes = onSnapshot(qClientes, (snapshot) => {
-      setClientes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    const unsubClientes = onSnapshot(qClientes, (s) => setClientes(s.docs.map(d => ({ id:d.id, ...d.data() }))));
 
-    // Buscar Ordens de Suporte
     const qOrdens = query(collection(db, "suporte"), orderBy("dataAgendada", "asc"));
-    const unsubOrdens = onSnapshot(qOrdens, (snapshot) => {
-      setOrdens(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    const unsubOrdens = onSnapshot(qOrdens, (s) => setOrdens(s.docs.map(d => ({ id:d.id, ...d.data() }))));
 
-    // Buscar Bobinas
     const qBobinas = query(collection(db, "bobinas"), orderBy("identificacao", "asc"));
-    const unsubBobinas = onSnapshot(qBobinas, (snapshot) => {
-      setBobinas(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    const unsubBobinas = onSnapshot(qBobinas, (s) => setBobinas(s.docs.map(d => ({ id:d.id, ...d.data() }))));
 
-    return () => { unsubClientes(); unsubOrdens(); unsubBobinas(); };
+    const qConsultas = query(collection(db, "consultas"), orderBy("dataConsulta", "desc"));
+    const unsubConsultas = onSnapshot(qConsultas, (s) => setConsultas(s.docs.map(d => ({ id:d.id, ...d.data() }))));
+
+    return () => { unsubClientes(); unsubOrdens(); unsubBobinas(); unsubConsultas(); };
   }, []);
 
-  // --- FUNÇÕES DE CLIENTES ---
+  // ============================================================
+  //  FUNÇÕES: CLIENTES
+  // ============================================================
   const salvarCliente = async () => {
     if (!cliente.nome || !cliente.serial) return alert("Nome e Serial são obrigatórios!");
-    
     if (!editandoClienteId) {
-      const serialEmUso = clientes.find(c => c.serial.toLowerCase() === cliente.serial.toLowerCase() && c.status === 'Ativo');
-      if (serialEmUso) return alert(`⚠️ BLOQUEADO: O Serial (SN) ${cliente.serial} já está em uso pelo assinante ATIVO: ${serialEmUso.nome}!`);
-      const nomeEmUso = clientes.find(c => c.nome.toLowerCase() === cliente.nome.toLowerCase() && c.status === 'Ativo');
-      if (nomeEmUso) return alert(`⚠️ BLOQUEADO: Já existe um assinante ATIVO com o nome ${cliente.nome}!`);
+      if (clientes.find(c => c.serial?.toLowerCase() === cliente.serial.toLowerCase() && c.status === 'Ativo'))
+        return alert(`⚠️ Serial ${cliente.serial} já em uso!`);
+      if (clientes.find(c => c.nome?.toLowerCase() === cliente.nome.toLowerCase() && c.status === 'Ativo'))
+        return alert(`⚠️ Nome ${cliente.nome} já cadastrado!`);
     }
-
     try {
       if (editandoClienteId) {
         await updateDoc(doc(db, "clientes", editandoClienteId), { ...cliente });
@@ -103,22 +328,23 @@ export default function App() {
       } else {
         await addDoc(collection(db, "clientes"), { ...cliente, dataCadastro: new Date().toISOString() });
       }
-      setCliente({ nome: '', login: '', serial: '', cto: '', porta: '', observacao: '', status: 'Ativo' });
-    } catch (e) { alert("Erro ao guardar dados."); }
+      setCliente({ nome:'', login:'', serial:'', cto:'', porta:'', observacao:'', status:'Ativo' });
+    } catch { alert("Erro ao salvar."); }
   };
 
-  const alternarStatusCliente = async (id, statusAtual) => {
-    const novoStatus = statusAtual === 'Ativo' ? 'Desativado' : 'Ativo';
-    await updateDoc(doc(db, "clientes", id), { status: novoStatus });
+  const alternarStatusCliente = async (id, status) => {
+    await updateDoc(doc(db, "clientes", id), { status: status === 'Ativo' ? 'Desativado' : 'Ativo' });
   };
 
   const excluirCliente = async (id) => {
-    if (window.confirm("Deseja realmente apagar este registo?")) await deleteDoc(doc(db, "clientes", id));
+    if (window.confirm("Apagar este cliente?")) await deleteDoc(doc(db, "clientes", id));
   };
 
-  // --- FUNÇÕES DE SUPORTE (OS) ---
+  // ============================================================
+  //  FUNÇÕES: ORDENS DE SERVIÇO
+  // ============================================================
   const salvarOrdem = async () => {
-    if (!ordem.nome || !ordem.tipo) return alert("Nome e Tipo de Serviço são obrigatórios!");
+    if (!ordem.nome || !ordem.tipo) return alert("Nome e Tipo são obrigatórios!");
     try {
       if (editandoOrdemId) {
         await updateDoc(doc(db, "suporte", editandoOrdemId), { ...ordem });
@@ -126,508 +352,761 @@ export default function App() {
       } else {
         await addDoc(collection(db, "suporte"), { ...ordem, dataCriacao: new Date().toISOString() });
       }
-      setOrdem({ nome: '', serial: '', cto: '', porta: '', tipo: 'Nova Ativação', dataAgendada: '', relato: '', status: 'Pendente' });
-      alert("Ordem de Serviço salva com sucesso!");
-    } catch (e) { alert("Erro ao guardar ordem."); }
+      setOrdem({ nome:'', serial:'', cto:'', porta:'', tipo:'Nova Ativação', dataAgendada:'', relato:'', status:'Pendente' });
+    } catch { alert("Erro ao salvar."); }
   };
 
-  const alterarStatusOrdem = async (id, statusAtual) => {
-    const proximoStatus = {
-      'Pendente': 'Concluído',
-      'Concluído': 'Pago',
-      'Pago': 'Pendente'
-    };
-    await updateDoc(doc(db, "suporte", id), { status: proximoStatus[statusAtual] });
+  const alterarStatusOrdem = async (id, status) => {
+    const prox = { 'Pendente': 'Concluído', 'Concluído': 'Pago', 'Pago': 'Pendente' };
+    await updateDoc(doc(db, "suporte", id), { status: prox[status] });
   };
 
   const excluirOrdem = async (id) => {
-    if (window.confirm("Apagar esta Ordem de Serviço?")) await deleteDoc(doc(db, "suporte", id));
+    if (window.confirm("Apagar esta OS?")) await deleteDoc(doc(db, "suporte", id));
   };
 
-  // --- FUNÇÕES DE BOBINAS ---
+  // ============================================================
+  //  FUNÇÕES: BOBINAS
+  // ============================================================
   const salvarBobina = async () => {
-    if (!bobina.identificacao || !bobina.total) return alert("Identificação e Total de Metros são obrigatórios!");
+    if (!bobina.identificacao || !bobina.total) return alert("Identificação e Total são obrigatórios!");
     try {
       await addDoc(collection(db, "bobinas"), { ...bobina, total: Number(bobina.total), usado: Number(bobina.usado || 0), dataEntrada: new Date().toISOString() });
-      setBobina({ identificacao: '', tipo: 'Drop 1FO', total: '', usado: '', marca: '' });
-      alert("Bobina registrada no sistema!");
-    } catch (e) { alert("Erro ao guardar bobina."); }
+      setBobina({ identificacao:'', tipo:'Drop 1FO', total:'', usado:'', marca:'' });
+    } catch { alert("Erro ao salvar."); }
   };
 
-  // Lógica inteligente de subtração de metragem
   const registrarUso = async (id, usadoAtual, valorDesconto) => {
-    if (!valorDesconto || isNaN(valorDesconto) || Number(valorDesconto) <= 0) {
-      return alert("Insira um valor de metragem válido para descontar.");
-    }
-    const novoUsado = Number(usadoAtual) + Number(valorDesconto);
-    await updateDoc(doc(db, "bobinas", id), { usado: novoUsado });
+    if (!valorDesconto || isNaN(valorDesconto) || Number(valorDesconto) <= 0)
+      return alert("Insira uma metragem válida.");
+    await updateDoc(doc(db, "bobinas", id), { usado: Number(usadoAtual) + Number(valorDesconto) });
   };
 
   const excluirBobina = async (id) => {
-    if (window.confirm("Deseja realmente apagar esta bobina do estoque?")) await deleteDoc(doc(db, "bobinas", id));
+    if (window.confirm("Apagar esta bobina?")) await deleteDoc(doc(db, "bobinas", id));
   };
 
-  // --- EXPORTAÇÃO ---
+  // ============================================================
+  //  FUNÇÕES: CONSULTAS SERASA
+  // ============================================================
+  const salvarConsulta = async () => {
+    if (!consulta.nome || !consulta.documento) return alert("Nome e Documento são obrigatórios!");
+    try {
+      if (editandoConsultaId) {
+        await updateDoc(doc(db, "consultas", editandoConsultaId), { ...consulta, score: consulta.score ? Number(consulta.score) : null });
+        setEditandoConsultaId(null);
+      } else {
+        await addDoc(collection(db, "consultas"), {
+          ...consulta,
+          score: consulta.score ? Number(consulta.score) : null,
+          dataCriacao: new Date().toISOString()
+        });
+      }
+      setConsulta({ nome:'', documento:'', tipoDoc:'CPF', score:'', resultado:'Pendente Análise', restricoes:'', observacao:'', dataConsulta: new Date().toISOString().split('T')[0], telefone:'', convertido: false });
+      alert("Consulta registrada!");
+    } catch { alert("Erro ao salvar."); }
+  };
+
+  const toggleConvertido = async (id, atual) => {
+    await updateDoc(doc(db, "consultas", id), { convertido: !atual });
+  };
+
+  const excluirConsulta = async (id) => {
+    if (window.confirm("Apagar esta consulta?")) await deleteDoc(doc(db, "consultas", id));
+  };
+
+  const exportarConsultasPDF = () => {
+    const docPDF = new jsPDF();
+    docPDF.setFontSize(16);
+    docPDF.text("LUMIX FIBRA — Relatório de Consultas Serasa", 14, 18);
+    docPDF.setFontSize(9);
+    docPDF.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, 14, 25);
+    const rows = consultasFiltradas.map(c => [
+      c.nome, c.tipoDoc, c.documento, c.score ?? '—', c.resultado,
+      c.convertido ? 'Sim' : 'Não',
+      c.dataConsulta ? new Date(c.dataConsulta).toLocaleDateString('pt-BR') : '—'
+    ]);
+    docPDF.autoTable({
+      startY: 30,
+      head: [['Nome', 'Tipo', 'Documento', 'Score', 'Resultado', 'Convertido', 'Data']],
+      body: rows,
+      theme: 'grid',
+      headStyles: { fillColor: [99, 102, 241], fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+    });
+    docPDF.save("Consultas_Serasa_Lumix.pdf");
+  };
+
+  // ============================================================
+  //  EXPORTAÇÃO
+  // ============================================================
   const exportarRelatorio = (tipo) => {
     if (tipo === 'excel') {
-      const cabecalho = "Nome,Serial,Login,CTO,Porta,Status,Observacao\n";
-      const dados = clientes.map(c => `"${c.nome}","${c.serial}","${c.login}","${c.cto}","${c.porta}","${c.status}","${c.observacao || ''}"`).join("\n");
-      const blob = new Blob([cabecalho + dados], { type: 'text/csv;charset=utf-8;' });
+      const cab = "Nome,Serial,Login,CTO,Porta,Status\n";
+      const dados = clientes.map(c => `"${c.nome}","${c.serial}","${c.login}","${c.cto}","${c.porta}","${c.status}"`).join("\n");
+      const blob = new Blob([cab + dados], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = `Lumix_Relatorio_${new Date().toLocaleDateString()}.csv`;
+      link.download = `Lumix_Clientes_${new Date().toLocaleDateString()}.csv`;
       link.click();
     } else {
       const docPDF = new jsPDF();
-      docPDF.setFontSize(18);
-      docPDF.text("LUMIX FIBRA - Relatório Técnico", 14, 20);
-      docPDF.setFontSize(10);
-      docPDF.text(`Gerado em ${new Date().toLocaleDateString()}`, 14, 28);
-      const rows = clientes.map(c => [c.nome, c.serial, c.login, `${c.cto} / P${c.porta}`, c.status]);
-      docPDF.autoTable({ startY: 35, head: [['Assinante', 'Serial (SN)', 'Login', 'CTO/Porta', 'Status']], body: rows, theme: 'grid', headStyles: { fillColor: [30, 64, 175] } });
-      docPDF.save("Relatorio_Lumix_Fibra.pdf");
+      docPDF.setFontSize(16);
+      docPDF.text("LUMIX FIBRA — Relatório de Clientes", 14, 18);
+      docPDF.setFontSize(9);
+      docPDF.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`, 14, 25);
+      const rows = clientes.map(c => [c.nome, c.serial, c.login, `${c.cto}/P${c.porta}`, c.status]);
+      docPDF.autoTable({ startY: 30, head: [['Assinante','Serial','Login','CTO/Porta','Status']], body: rows, theme:'grid', headStyles:{ fillColor:[37,99,235] } });
+      docPDF.save("Clientes_Lumix_Fibra.pdf");
     }
   };
 
-  // --- RENDERIZAÇÃO CONDICIONAL E FILTROS ---
+  // ============================================================
+  //  FILTROS
+  // ============================================================
   const clientesFiltrados = clientes.filter(c => {
-    const search = buscaCliente.toLowerCase();
-    return (c.nome?.toLowerCase().includes(search) || c.serial?.toLowerCase().includes(search) || c.login?.toLowerCase().includes(search)) && 
+    const s = buscaCliente.toLowerCase();
+    return (c.nome?.toLowerCase().includes(s) || c.serial?.toLowerCase().includes(s) || c.login?.toLowerCase().includes(s)) &&
            (filtroStatusCliente === 'Todos' || c.status === filtroStatusCliente);
-  }).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' }));
+  }).sort((a,b) => (a.nome||'').localeCompare(b.nome||'','pt-BR',{sensitivity:'base'}));
 
   const ordensFiltradas = ordens.filter(o => {
-    const search = buscaOrdem.toLowerCase();
-    return (o.nome?.toLowerCase().includes(search) || o.serial?.toLowerCase().includes(search) || o.cto?.toLowerCase().includes(search)) &&
+    const s = buscaOrdem.toLowerCase();
+    return (o.nome?.toLowerCase().includes(s) || o.serial?.toLowerCase().includes(s) || o.cto?.toLowerCase().includes(s)) &&
            (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem) &&
            (filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem);
   });
 
-  // --- CONTAGEM DE ITENS ---
-  const contagemOrdens = {
-    'Todos': ordens.filter(o => filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem).length,
-    'Pendente': ordens.filter(o => o.status === 'Pendente' && (filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem)).length,
-    'Concluído': ordens.filter(o => o.status === 'Concluído' && (filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem)).length,
-    'Pago': ordens.filter(o => o.status === 'Pago' && (filtroTipoOrdem === 'Todos Tipos' || o.tipo === filtroTipoOrdem)).length
+  const consultasFiltradas = consultas.filter(c => {
+    const s = buscaConsulta.toLowerCase();
+    return (c.nome?.toLowerCase().includes(s) || c.documento?.toLowerCase().includes(s)) &&
+           (filtroResultado === 'Todos' || c.resultado === filtroResultado) &&
+           (filtroTipoDoc === 'Todos' || c.tipoDoc === filtroTipoDoc);
+  });
+
+  // ============================================================
+  //  STATS
+  // ============================================================
+  const statsSerasa = {
+    total: consultas.length,
+    aprovados: consultas.filter(c => c.resultado === 'Aprovado').length,
+    reprovados: consultas.filter(c => c.resultado === 'Reprovado').length,
+    restricoes: consultas.filter(c => c.resultado === 'Com Restrições').length,
+    convertidos: consultas.filter(c => c.convertido).length,
+    taxaAprovacao: consultas.length ? Math.round((consultas.filter(c => c.resultado === 'Aprovado').length / consultas.length) * 100) : 0,
+    scoreMedia: consultas.filter(c => c.score).length
+      ? Math.round(consultas.filter(c => c.score).reduce((a, c) => a + Number(c.score), 0) / consultas.filter(c => c.score).length)
+      : 0,
   };
 
-  const contagemTipos = {
-    'Todos Tipos': ordens.filter(o => filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem).length,
-    'Nova Ativação': ordens.filter(o => o.tipo === 'Nova Ativação' && (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem)).length,
-    'Reparo Técnico': ordens.filter(o => o.tipo === 'Reparo Técnico' && (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem)).length,
-    'Mudança de Endereço': ordens.filter(o => o.tipo === 'Mudança de Endereço' && (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem)).length,
-    'Recolha de Equipamento': ordens.filter(o => o.tipo === 'Recolha de Equipamento' && (filtroStatusOrdem === 'Todos' || o.status === filtroStatusOrdem)).length
-  };
+  const countOrdens = { 'Todos': ordens.length, 'Pendente': ordens.filter(o=>o.status==='Pendente').length, 'Concluído': ordens.filter(o=>o.status==='Concluído').length, 'Pago': ordens.filter(o=>o.status==='Pago').length };
+  const countTipos = { 'Todos Tipos': ordens.length, 'Nova Ativação': ordens.filter(o=>o.tipo==='Nova Ativação').length, 'Reparo Técnico': ordens.filter(o=>o.tipo==='Reparo Técnico').length, 'Mudança de Endereço': ordens.filter(o=>o.tipo==='Mudança de Endereço').length, 'Recolha de Equipamento': ordens.filter(o=>o.tipo==='Recolha de Equipamento').length };
 
-  const contagemClientes = {
-    'Todos': clientes.length,
-    'Desativado': clientes.filter(c => c.status === 'Desativado').length
-  };
+  // ============================================================
+  //  ESTILOS INLINE HELPERS
+  // ============================================================
+  const btnTab = (ativo, cor) => ({
+    padding: '8px 14px',
+    borderRadius: '10px',
+    fontSize: '10px',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    cursor: 'pointer',
+    border: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    transition: 'all 0.2s ease',
+    background: ativo ? cor : 'transparent',
+    color: ativo ? 'white' : '#64748b',
+  });
 
+  const inputStyle = { padding: '14px 16px', borderRadius: '12px', width: '100%', fontSize: '14px' };
+  const fieldWrap = { display: 'flex', flexDirection: 'column', gap: '0' };
+
+  // ============================================================
+  //  RENDER
+  // ============================================================
   return (
-    <div className="min-h-screen p-4 md:p-8 text-slate-100 pb-20 overflow-x-hidden">
-      <TailwindStyle />
-      <div className="max-w-6xl mx-auto">
-        
-        {/* HEADER COMUM */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
-          <div onClick={() => setTelaAtual('menu')} className="cursor-pointer">
-            <h1 className="text-2xl font-black text-white flex items-center gap-2 uppercase tracking-tighter"><Wifi className="text-blue-500" /> Lumix Fibra</h1>
-            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Painel Administrativo v2.0</p>
-          </div>
-          <div className="flex items-center gap-3 glass p-2 px-4 rounded-2xl border border-white/5">
-            <div className="text-right hidden sm:block">
-              <div className="text-sm font-bold truncate max-w-[150px]">Equipe Técnica</div>
-              <div className="text-[9px] text-green-400 uppercase font-black">Sistema Aberto e Online</div>
+    <div style={{ minHeight: '100vh', padding: '24px 16px 80px', maxWidth: '1280px', margin: '0 auto' }}>
+      <GlobalStyle />
+
+      {/* HEADER */}
+      <header style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 40, flexWrap:'wrap', gap: 16 }}>
+        <div onClick={() => setTelaAtual('menu')} style={{ cursor:'pointer' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <div style={{ background:'linear-gradient(135deg,#3b82f6,#6366f1)', padding:'8px', borderRadius:'12px', display:'flex' }}>
+              <Wifi size={22} color="white" />
+            </div>
+            <div>
+              <h1 style={{ fontSize:'22px', fontWeight:800, color:'white', margin:0, letterSpacing:'-0.5px' }}>Lumix Fibra</h1>
+              <p style={{ fontSize:'9px', fontWeight:700, color:'#475569', margin:0, letterSpacing:'0.15em', textTransform:'uppercase' }}>Painel Administrativo v2.1</p>
             </div>
           </div>
-        </header>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', gap:10, background:'rgba(16,24,40,0.6)', padding:'10px 16px', borderRadius:'14px', border:'1px solid rgba(255,255,255,0.07)' }}>
+          <div style={{ width:8, height:8, borderRadius:'50%', background:'#22c55e' }} className="pulse-dot" />
+          <span style={{ fontSize:'12px', fontWeight:600, color:'#94a3b8' }}>Sistema Online</span>
+        </div>
+      </header>
 
-        {/* TELA: MENU PRINCIPAL */}
-        {telaAtual === 'menu' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 animate-in slide-in-from-bottom-10 duration-500">
-            <button onClick={() => setTelaAtual('clientes')} className="glass p-12 rounded-3xl group hover:border-blue-500/50 transition-all text-center flex flex-col items-center gap-6 shadow-xl">
-              <div className="bg-blue-600/20 p-8 rounded-full text-blue-500 group-hover:bg-blue-600 group-hover:text-white transition-all"><Users size={48} /></div>
-              <h3 className="text-2xl font-black uppercase tracking-tight">Clientes e CTO</h3>
-              <p className="text-slate-400 text-sm">Gerencie portas, seriais e localização técnica.</p>
-            </button>
-
-            <button onClick={() => setTelaAtual('suporte')} className="glass p-12 rounded-3xl group hover:border-orange-500/50 transition-all text-center flex flex-col items-center gap-6 shadow-xl">
-              <div className="bg-orange-600/20 p-8 rounded-full text-orange-500 group-hover:bg-orange-600 group-hover:text-white transition-all"><Wrench size={48} /></div>
-              <h3 className="text-2xl font-black uppercase tracking-tight text-white">Ativação e Suporte</h3>
-              <p className="text-slate-400 text-sm">Ordens de serviço, novas instalações e reparos.</p>
-            </button>
-
-            <button onClick={() => setTelaAtual('bobinas')} className="glass p-12 rounded-3xl group hover:border-emerald-500/50 transition-all text-center flex flex-col items-center gap-6 shadow-xl">
-              <div className="bg-emerald-600/20 p-8 rounded-full text-emerald-500 group-hover:bg-emerald-600 group-hover:text-white transition-all"><Database size={48} /></div>
-              <h3 className="text-2xl font-black uppercase tracking-tight text-white">Bobinas</h3>
-              <p className="text-slate-400 text-sm">Controle de estoque e metragem de fibra óptica.</p>
-            </button>
+      {/* ========================== MENU ========================== */}
+      {telaAtual === 'menu' && (
+        <div className="animate-page">
+          {/* Resumo rápido */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))', gap:12, marginBottom:40 }}>
+            {[
+              { label:'Clientes Ativos', val: clientes.filter(c=>c.status==='Ativo').length, color:'#3b82f6' },
+              { label:'OS Pendentes',    val: ordens.filter(o=>o.status==='Pendente').length, color:'#f59e0b' },
+              { label:'OS Concluídas',   val: ordens.filter(o=>o.status==='Concluído').length, color:'#22c55e' },
+              { label:'Consultas Serasa',val: consultas.length, color:'#a78bfa' },
+              { label:'Aprovados Serasa',val: statsSerasa.aprovados, color:'#34d399' },
+            ].map(({ label, val, color }) => (
+              <div key={label} className="stat-card">
+                <p style={{ fontSize:'10px', fontWeight:700, color:'#475569', textTransform:'uppercase', letterSpacing:'0.08em', margin:'0 0 6px' }}>{label}</p>
+                <p style={{ fontSize:'28px', fontWeight:800, color, margin:0, lineHeight:1 }}>{val}</p>
+              </div>
+            ))}
           </div>
-        )}
 
-        {/* TELA: BOBINAS */}
-        {telaAtual === 'bobinas' && (
-          <div className="animate-in fade-in duration-700">
-            <button onClick={() => setTelaAtual('menu')} className="mb-6 text-emerald-400 font-bold flex items-center gap-2 hover:text-emerald-300 transition-colors"><LayoutDashboard size={18} /> Voltar ao Painel</button>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              
-              {/* Formulário Bobinas */}
-              <div className="glass p-8 rounded-3xl mb-10 shadow-2xl border border-emerald-500/10 lg:col-span-1 h-fit">
-                <div className="flex items-center gap-2 mb-8 border-b border-white/5 pb-4">
-                  <Plus className="text-emerald-500" />
-                  <h2 className="text-xl font-black uppercase tracking-tight">Nova Bobina</h2>
+          {/* Cards de módulos */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))', gap:20 }}>
+            {[
+              { id:'clientes', icon:<Users size={36}/>, label:'Clientes & CTO', desc:'Gerencie portas, seriais e localização técnica.', cor:'#3b82f6', bgCor:'rgba(59,130,246,0.1)', bord:'rgba(59,130,246,0.25)' },
+              { id:'suporte',  icon:<Wrench size={36}/>, label:'Ativação & Suporte', desc:'Ordens de serviço, novas instalações e reparos.', cor:'#f59e0b', bgCor:'rgba(245,158,11,0.1)', bord:'rgba(245,158,11,0.25)' },
+              { id:'bobinas',  icon:<Database size={36}/>, label:'Bobinas de Fibra', desc:'Controle de estoque e metragem em campo.', cor:'#10b981', bgCor:'rgba(16,185,129,0.1)', bord:'rgba(16,185,129,0.25)' },
+              { id:'serasa',   icon:<FileSearch size={36}/>, label:'Consulta Serasa', desc:'Histórico de consultas CPF/CNPJ e análise de crédito.', cor:'#a78bfa', bgCor:'rgba(167,139,250,0.1)', bord:'rgba(167,139,250,0.25)' },
+            ].map(m => (
+              <button key={m.id} onClick={() => setTelaAtual(m.id)} className="menu-card"
+                style={{ background:'rgba(16,24,40,0.7)', border:`1px solid ${m.bord}`, borderRadius:24, padding:'36px 28px', textAlign:'left', cursor:'pointer', display:'flex', flexDirection:'column', gap:20 }}>
+                <div style={{ background: m.bgCor, borderRadius:16, padding:16, width:'fit-content', color: m.cor }}>
+                  {m.icon}
                 </div>
+                <div>
+                  <h3 style={{ fontSize:'18px', fontWeight:800, color:'white', margin:'0 0 6px', letterSpacing:'-0.3px' }}>{m.label}</h3>
+                  <p style={{ fontSize:'13px', color:'#64748b', margin:0, lineHeight:1.5 }}>{m.desc}</p>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:6, color: m.cor, fontSize:'12px', fontWeight:700, letterSpacing:'0.05em', textTransform:'uppercase' }}>
+                  Acessar <ChevronRight size={14}/>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ========================== SERASA ========================== */}
+      {telaAtual === 'serasa' && (
+        <div className="animate-page">
+          <button onClick={() => setTelaAtual('menu')} style={{ marginBottom:24, color:'#a78bfa', fontWeight:700, fontSize:'13px', display:'flex', alignItems:'center', gap:6, background:'none', border:'none', cursor:'pointer' }}>
+            <LayoutDashboard size={16}/> Voltar ao Painel
+          </button>
+
+          {/* Stats Serasa */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))', gap:12, marginBottom:32 }}>
+            {[
+              { label:'Total Consultas', val: statsSerasa.total, color:'#a78bfa', Icon: FileSearch },
+              { label:'Aprovados',       val: statsSerasa.aprovados, color:'#4ade80', Icon: ShieldCheck },
+              { label:'Reprovados',      val: statsSerasa.reprovados, color:'#f87171', Icon: ShieldX },
+              { label:'Com Restrições',  val: statsSerasa.restricoes, color:'#fbbf24', Icon: ShieldAlert },
+              { label:'Convertidos',     val: statsSerasa.convertidos, color:'#38bdf8', Icon: BadgeCheck },
+              { label:'Taxa Aprovação',  val: `${statsSerasa.taxaAprovacao}%`, color:'#a78bfa', Icon: TrendingUp },
+              { label:'Score Médio',     val: statsSerasa.scoreMedia || '—', color:'#fb923c', Icon: Star },
+            ].map(({ label, val, color, Icon }) => (
+              <div key={label} className="stat-card" style={{ textAlign:'center' }}>
+                <Icon size={18} color={color} style={{ marginBottom:8 }}/>
+                <p style={{ fontSize:'9px', fontWeight:700, color:'#475569', textTransform:'uppercase', letterSpacing:'0.08em', margin:'0 0 4px' }}>{label}</p>
+                <p style={{ fontSize:'22px', fontWeight:800, color, margin:0 }}>{val}</p>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'340px 1fr', gap:24 }}>
+            
+            {/* Formulário Serasa */}
+            <div className="glass" style={{ borderRadius:24, padding:'28px', borderColor:'rgba(167,139,250,0.15)', height:'fit-content' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:24, paddingBottom:16, borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                <FileSearch size={18} color="#a78bfa"/>
+                <h2 style={{ fontSize:'15px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.06em', margin:0, color:'white' }}>
+                  {editandoConsultaId ? 'Editar Consulta' : 'Nova Consulta'}
+                </h2>
+              </div>
+
+              <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
                 
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Identificação</label>
-                    <input type="text" placeholder="Ex: Bobina 01 (Carro do João)" className="p-4 rounded-2xl" value={bobina.identificacao} onChange={e => setBobina({...bobina, identificacao: e.target.value})} />
+                {/* Nome */}
+                <div style={fieldWrap}>
+                  <p className="field-label">Nome Completo</p>
+                  <input style={inputStyle} type="text" placeholder="Nome do solicitante..." value={consulta.nome} onChange={e => setConsulta({...consulta, nome: e.target.value})} />
+                </div>
+
+                {/* Tipo Doc + Documento */}
+                <div style={fieldWrap}>
+                  <p className="field-label">Tipo de Documento</p>
+                  <div style={{ display:'grid', gridTemplateColumns:'100px 1fr', gap:8 }}>
+                    <select style={{...inputStyle}} value={consulta.tipoDoc} onChange={e => setConsulta({...consulta, tipoDoc: e.target.value, documento: ''})}>
+                      <option>CPF</option>
+                      <option>CNPJ</option>
+                    </select>
+                    <input style={inputStyle} type="text" placeholder={consulta.tipoDoc === 'CPF' ? '000.000.000-00' : '00.000.000/0000-00'}
+                      value={consulta.documento}
+                      onChange={e => setConsulta({...consulta, documento: formatarDocumento(e.target.value, consulta.tipoDoc)})} />
                   </div>
-                  
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Tipo de Cabo</label>
-                    <select className="p-4 rounded-2xl font-bold cursor-pointer" value={bobina.tipo} onChange={e => setBobina({...bobina, tipo: e.target.value})}>
-                      <option>Drop 1FO</option>
-                      <option>AS-80 6FO</option>
-                      <option>AS-80 12FO</option>
+                </div>
+
+                {/* Telefone */}
+                <div style={fieldWrap}>
+                  <p className="field-label">Telefone / WhatsApp</p>
+                  <input style={inputStyle} type="tel" placeholder="(00) 00000-0000" value={consulta.telefone} onChange={e => setConsulta({...consulta, telefone: e.target.value})} />
+                </div>
+
+                {/* Score + Resultado */}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                  <div style={fieldWrap}>
+                    <p className="field-label">Score (0–1000)</p>
+                    <input style={{...inputStyle}} type="number" min="0" max="1000" placeholder="Ex: 750" value={consulta.score} onChange={e => setConsulta({...consulta, score: e.target.value})} />
+                  </div>
+                  <div style={fieldWrap}>
+                    <p className="field-label">Resultado</p>
+                    <select style={inputStyle} value={consulta.resultado} onChange={e => setConsulta({...consulta, resultado: e.target.value})}>
+                      <option>Aprovado</option>
+                      <option>Reprovado</option>
+                      <option>Com Restrições</option>
+                      <option>Pendente Análise</option>
                     </select>
                   </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Total (m)</label>
-                      <input type="number" placeholder="Ex: 1000" className="p-4 rounded-2xl" value={bobina.total} onChange={e => setBobina({...bobina, total: e.target.value})} />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Já Usado (m)</label>
-                      <input type="number" placeholder="Ex: 0" className="p-4 rounded-2xl" value={bobina.usado} onChange={e => setBobina({...bobina, usado: e.target.value})} />
-                    </div>
+                </div>
+
+                {/* Data */}
+                <div style={fieldWrap}>
+                  <p className="field-label">Data da Consulta</p>
+                  <input style={inputStyle} type="date" value={consulta.dataConsulta} onChange={e => setConsulta({...consulta, dataConsulta: e.target.value})} />
+                </div>
+
+                {/* Restrições */}
+                <div style={fieldWrap}>
+                  <p className="field-label">Restrições Encontradas</p>
+                  <textarea style={{...inputStyle, height:64, resize:'none'}} placeholder="Dívidas, pendências, protestos..." value={consulta.restricoes} onChange={e => setConsulta({...consulta, restricoes: e.target.value})} />
+                </div>
+
+                {/* Observação */}
+                <div style={fieldWrap}>
+                  <p className="field-label">Observação Interna</p>
+                  <textarea style={{...inputStyle, height:56, resize:'none'}} placeholder="Notas internas, decisão final..." value={consulta.observacao} onChange={e => setConsulta({...consulta, observacao: e.target.value})} />
+                </div>
+
+                {/* Convertido toggle */}
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', background:'rgba(8,12,20,0.5)', borderRadius:12, border:'1px solid rgba(255,255,255,0.06)' }}>
+                  <div>
+                    <p style={{ fontSize:'12px', fontWeight:700, color:'#94a3b8', margin:'0 0 2px' }}>Convertido em Cliente</p>
+                    <p style={{ fontSize:'10px', color:'#475569', margin:0 }}>Assinante ativado após aprovação</p>
                   </div>
-                  
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Marca/Fornecedor (Opcional)</label>
-                    <input type="text" placeholder="Ex: Furukawa, Prysmian..." className="p-4 rounded-2xl" value={bobina.marca} onChange={e => setBobina({...bobina, marca: e.target.value})} />
+                  <button onClick={() => setConsulta({...consulta, convertido: !consulta.convertido})}
+                    style={{ width:44, height:24, borderRadius:12, border:'none', cursor:'pointer', transition:'all 0.2s', position:'relative',
+                      background: consulta.convertido ? '#6366f1' : 'rgba(255,255,255,0.08)' }}>
+                    <span style={{ position:'absolute', top:3, left: consulta.convertido ? 23 : 3, width:18, height:18, borderRadius:'50%', background:'white', transition:'left 0.2s', display:'block' }}/>
+                  </button>
+                </div>
+
+                <button onClick={salvarConsulta} className="btn-primary"
+                  style={{ background:'linear-gradient(135deg,#7c3aed,#6366f1)', color:'white', marginTop:4 }}>
+                  <Save size={18}/> {editandoConsultaId ? 'Atualizar Consulta' : 'Registrar Consulta'}
+                </button>
+                {editandoConsultaId && (
+                  <button onClick={() => { setEditandoConsultaId(null); setConsulta({nome:'',documento:'',tipoDoc:'CPF',score:'',resultado:'Pendente Análise',restricoes:'',observacao:'',dataConsulta:new Date().toISOString().split('T')[0],telefone:'',convertido:false}); }}
+                    style={{ background:'none', border:'none', color:'#475569', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', cursor:'pointer', textAlign:'center' }}>
+                    Cancelar Edição
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Lista de Consultas */}
+            <div className="glass" style={{ borderRadius:24, overflow:'hidden', borderColor:'rgba(255,255,255,0.05)' }}>
+              {/* Toolbar */}
+              <div style={{ padding:'20px 24px', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ position:'relative', marginBottom:14 }}>
+                  <Search size={16} color="#475569" style={{ position:'absolute', left:14, top:'50%', transform:'translateY(-50%)' }}/>
+                  <input style={{...inputStyle, paddingLeft:42}} type="text" placeholder="Buscar por nome ou documento..." value={buscaConsulta} onChange={e => setBuscaConsulta(e.target.value)} />
+                </div>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
+                  {/* Filtro resultado */}
+                  <div style={{ display:'flex', gap:4, padding:4, background:'rgba(8,12,20,0.6)', borderRadius:12, border:'1px solid rgba(255,255,255,0.05)' }}>
+                    {['Todos','Aprovado','Reprovado','Com Restrições','Pendente Análise'].map(r => (
+                      <button key={r} onClick={() => setFiltroResultado(r)} style={btnTab(filtroResultado===r,'#7c3aed')}>
+                        {r === 'Todos' ? 'Todos' : r}
+                        <span style={{ fontSize:9, padding:'1px 5px', borderRadius:4, background: filtroResultado===r ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)', color: filtroResultado===r ? 'white' : '#475569' }}>
+                          {r === 'Todos' ? consultas.length : consultas.filter(c=>c.resultado===r).length}
+                        </span>
+                      </button>
+                    ))}
                   </div>
-                  
-                  <button onClick={salvarBobina} className="bg-emerald-600 text-white p-5 rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-emerald-700 transition-all uppercase tracking-widest mt-2 active:scale-95 shadow-xl shadow-emerald-900/20">
-                    <Save size={22} /> Registrar Bobina
+                  {/* Filtro tipo doc */}
+                  <div style={{ display:'flex', gap:4, padding:4, background:'rgba(8,12,20,0.6)', borderRadius:12, border:'1px solid rgba(255,255,255,0.05)' }}>
+                    {['Todos','CPF','CNPJ'].map(t => (
+                      <button key={t} onClick={() => setFiltroTipoDoc(t)} style={btnTab(filtroTipoDoc===t,'#4f46e5')}>{t}</button>
+                    ))}
+                  </div>
+                  {/* Exportar PDF */}
+                  <button onClick={exportarConsultasPDF} style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:10, background:'rgba(239,68,68,0.1)', color:'#f87171', border:'1px solid rgba(239,68,68,0.2)', fontSize:11, fontWeight:700, cursor:'pointer', textTransform:'uppercase', letterSpacing:'0.05em' }}>
+                    <Printer size={14}/> PDF
                   </button>
                 </div>
               </div>
 
-              {/* Listagem Bobinas */}
-              <div className="lg:col-span-2 glass rounded-3xl overflow-hidden shadow-2xl border border-white/5 p-6 space-y-4">
-                <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-4">
-                  <Layers className="text-emerald-500" />
-                  <h2 className="text-xl font-black uppercase tracking-tight">Estoque de Fibra em Campo</h2>
-                </div>
-                
-                <div className="grid grid-cols-1 gap-4 custom-scrollbar overflow-y-auto max-h-[600px] pr-2">
-                  {bobinas.map(b => {
-                    const restante = b.total - b.usado;
-                    const perc = Math.min((b.usado / b.total) * 100, 100);
-                    
-                    return (
-                      <div key={b.id} className="bg-slate-900/50 p-6 rounded-2xl border border-white/5 border-l-4 hover:bg-white/5 transition-colors group" style={{borderLeftColor: '#10b981'}}>
-                        <div className="flex justify-between items-start mb-3">
-                          <div>
-                            <h3 className="text-lg font-bold text-white uppercase">{b.identificacao} <span className="text-[10px] text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded ml-2 border border-emerald-500/20">{b.tipo}</span></h3>
-                            <p className="text-[10px] font-mono text-slate-500 uppercase mt-1 tracking-wider">Marca: {b.marca || 'N/A'}</p>
+              {/* Cards de consultas */}
+              <div style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:10 }} className="custom-scrollbar" style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:10, overflowY:'auto', maxHeight:600 }}>
+                {consultasFiltradas.map(c => (
+                  <div key={c.id} style={{ background:'rgba(8,12,20,0.5)', borderRadius:16, padding:'16px 20px', border:'1px solid rgba(255,255,255,0.04)', borderLeft:`3px solid ${c.resultado==='Aprovado'?'#22c55e':c.resultado==='Reprovado'?'#ef4444':c.resultado==='Com Restrições'?'#f59e0b':'#64748b'}`, transition:'all 0.15s ease' }}
+                    className="table-row">
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12 }}>
+                      <div style={{ display:'flex', gap:14, alignItems:'flex-start', flex:1 }}>
+                        {/* Score Ring */}
+                        {c.score ? <ScoreRing score={Number(c.score)} size={56}/> : (
+                          <div style={{ width:56, height:56, borderRadius:'50%', background:'rgba(255,255,255,0.04)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                            <Hash size={18} color="#475569"/>
                           </div>
-                          <button onClick={() => excluirBobina(b.id)} className="text-slate-500 hover:text-red-500 p-2 hover:bg-red-500/10 rounded-lg transition-all"><Trash2 size={20}/></button>
-                        </div>
-                        
-                        <div className="flex justify-between items-end mb-2 mt-4">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Gasto Total: {b.usado}m ({perc.toFixed(1)}%)</span>
-                          <span className="text-emerald-400 font-black text-lg">{restante}m <small className="text-slate-500 font-normal uppercase text-[9px] tracking-widest">restantes</small></span>
-                        </div>
-                        
-                        <div className="progress-bar mb-5">
-                          <div className={`h-full transition-all duration-700 ${perc > 90 ? 'bg-red-500' : perc > 75 ? 'bg-yellow-500' : 'bg-emerald-500'}`} style={{ width: `${perc}%` }}></div>
-                        </div>
-
-                        {/* NOVA CAIXA DE DESCONTO INTELIGENTE */}
-                        <div className="mt-4 flex flex-col sm:flex-row items-center justify-between bg-black/20 p-3 rounded-xl border border-white/5 gap-3">
-                           <label className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-2">
-                             <Edit size={12} className="text-emerald-500"/> Descontar Uso da Instalação (m):
-                           </label>
-                           <div className="flex gap-2 w-full sm:w-auto">
-                             <input 
-                              type="number" 
-                              id={`desconto-${b.id}`}
-                              placeholder="Ex: 120"
-                              className="w-full sm:w-28 p-2 text-sm rounded-lg text-center font-black bg-slate-800 text-white border border-white/10 outline-none focus:ring-2 ring-emerald-500 transition-all" 
-                             />
-                             <button 
-                              onClick={() => {
-                                const input = document.getElementById(`desconto-${b.id}`);
-                                if(input.value) {
-                                  registrarUso(b.id, b.usado, input.value);
-                                  input.value = ''; // Limpa a caixa depois de clicar
-                                }
-                              }}
-                              className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all shadow-lg active:scale-95"
-                             >
-                               OK
-                             </button>
-                           </div>
+                        )}
+                        <div style={{ flex:1 }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:4 }}>
+                            <h3 style={{ fontSize:'15px', fontWeight:700, color:'white', margin:0 }}>{c.nome}</h3>
+                            {c.convertido && (
+                              <span style={{ fontSize:9, padding:'2px 8px', borderRadius:6, background:'rgba(56,189,248,0.15)', color:'#38bdf8', border:'1px solid rgba(56,189,248,0.2)', fontWeight:700, letterSpacing:'0.05em', textTransform:'uppercase' }}>
+                                ✓ Convertido
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display:'flex', flexWrap:'wrap', gap:10, alignItems:'center', marginBottom:8 }}>
+                            <ResultadoBadge resultado={c.resultado}/>
+                            <span style={{ fontSize:11, color:'#475569', fontFamily:'monospace' }}>{c.tipoDoc}: {c.documento}</span>
+                            {c.telefone && <span style={{ fontSize:11, color:'#475569' }}>📞 {c.telefone}</span>}
+                            <span style={{ fontSize:11, color:'#475569', display:'flex', alignItems:'center', gap:4 }}>
+                              <Calendar size={12}/> {c.dataConsulta ? new Date(c.dataConsulta).toLocaleDateString('pt-BR') : '—'}
+                            </span>
+                          </div>
+                          {c.restricoes && (
+                            <div style={{ fontSize:11, background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.12)', borderRadius:8, padding:'6px 10px', color:'#fca5a5', display:'flex', alignItems:'flex-start', gap:6 }}>
+                              <AlertCircle size={12} style={{ marginTop:1, flexShrink:0 }}/> {c.restricoes}
+                            </div>
+                          )}
+                          {c.observacao && !c.restricoes && (
+                            <div style={{ fontSize:11, color:'#64748b', fontStyle:'italic', display:'flex', alignItems:'flex-start', gap:5 }}>
+                              <Info size={11} style={{ marginTop:1, flexShrink:0 }}/> {c.observacao}
+                            </div>
+                          )}
                         </div>
                       </div>
-                    );
-                  })}
-                  {bobinas.length === 0 && <div className="text-center p-12 text-slate-500 text-xs font-black tracking-widest uppercase opacity-50 border border-dashed border-white/10 rounded-2xl">Nenhuma bobina cadastrada</div>}
-                </div>
-              </div>
-
-            </div>
-          </div>
-        )}
-
-        {/* TELA: ATIVAÇÃO E SUPORTE */}
-        {telaAtual === 'suporte' && (
-          <div className="animate-in fade-in duration-700">
-            <button onClick={() => setTelaAtual('menu')} className="mb-6 text-orange-400 font-bold flex items-center gap-2 hover:text-orange-300 transition-colors"><LayoutDashboard size={18} /> Voltar ao Menu</button>
-
-            {/* Formulário de OS */}
-            <div className="glass p-8 rounded-3xl mb-10 shadow-2xl border border-orange-500/10">
-              <div className="flex items-center gap-2 mb-8 border-b border-white/5 pb-4">
-                <Wrench className="text-orange-500" />
-                <h2 className="text-xl font-black uppercase tracking-tight">{editandoOrdemId ? "Editar Ordem" : "Nova Ordem de Serviço (OS)"}</h2>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Nome do Cliente / Assinante</label>
-                  <input type="text" placeholder="Nome completo..." className="p-4 rounded-2xl" value={ordem.nome} onChange={e => setOrdem({...ordem, nome: e.target.value})} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Serial (SN ONU)</label>
-                  <input type="text" placeholder="ZTEG..." className="p-4 rounded-2xl font-mono tracking-widest" value={ordem.serial} onChange={e => setOrdem({...ordem, serial: e.target.value})} />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">CTO / Porta (P)</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    <input type="text" placeholder="Caixa CTO" className="col-span-3 p-4 rounded-2xl" value={ordem.cto} onChange={e => setOrdem({...ordem, cto: e.target.value})} />
-                    <input type="text" placeholder="P" className="col-span-1 p-4 rounded-2xl text-center font-black" value={ordem.porta} onChange={e => setOrdem({...ordem, porta: e.target.value})} />
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Tipo de Serviço</label>
-                  <select className="p-4 rounded-2xl font-bold cursor-pointer" value={ordem.tipo} onChange={e => setOrdem({...ordem, tipo: e.target.value})}>
-                    <option value="Nova Ativação">Nova Ativação</option>
-                    <option value="Reparo Técnico">Reparo Técnico</option>
-                    <option value="Mudança de Endereço">Mudança de Endereço</option>
-                    <option value="Recolha de Equipamento">Recolha de Equipamento</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1.5 lg:col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Data Agendada</label>
-                  <input type="date" className="p-4 rounded-2xl" value={ordem.dataAgendada} onChange={e => setOrdem({...ordem, dataAgendada: e.target.value})} />
-                </div>
-
-                <div className="flex flex-col gap-1.5 md:col-span-2 lg:col-span-3">
-                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Relato do Problema / Observações</label>
-                  <textarea placeholder="Ex: Cliente relata luz LOS vermelha na ONU..." className="p-4 rounded-2xl h-20 resize-none" value={ordem.relato} onChange={e => setOrdem({...ordem, relato: e.target.value})} />
-                </div>
-
-                <button onClick={salvarOrdem} className="md:col-span-2 lg:col-span-3 bg-orange-600 text-white p-5 rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-orange-700 transition-all uppercase tracking-widest mt-2 shadow-xl shadow-orange-900/20 active:scale-95">
-                  <ClipboardList size={22} /> {editandoOrdemId ? "Atualizar OS" : "Gerar Ordem de Serviço"}
-                </button>
-                {editandoOrdemId && <button onClick={() => { setEditandoOrdemId(null); setOrdem({nome:'', serial:'', cto:'', porta:'', tipo:'Nova Ativação', dataAgendada:'', relato:'', status:'Pendente'}); }} className="md:col-span-2 lg:col-span-3 text-slate-500 text-xs font-bold uppercase hover:text-white transition-colors">Cancelar Edição</button>}
-              </div>
-            </div>
-
-            {/* Lista de OS */}
-            <div className="glass rounded-3xl overflow-hidden shadow-2xl border border-white/5">
-              <div className="p-6 bg-slate-800/50 border-b border-white/5 flex flex-col gap-4">
-                
-                {/* Barra de Busca */}
-                <div className="relative w-full">
-                  <Search className="absolute left-4 top-4 text-slate-500" size={20} />
-                  <input type="text" placeholder="Filtrar OS por nome, CTO ou SN..." className="w-full pl-12 p-4 rounded-2xl outline-none" value={buscaOrdem} onChange={e => setBuscaOrdem(e.target.value)} />
-                </div>
-
-                {/* Filtros em Linhas */}
-                <div className="flex flex-col xl:flex-row gap-3">
-                  {/* Status */}
-                  <div className="flex flex-wrap p-1 bg-slate-900 rounded-xl border border-white/5 gap-1">
-                    {['Todos', 'Pendente', 'Concluído', 'Pago'].map(status => (
-                      <button 
-                        key={status} 
-                        onClick={() => setFiltroStatusOrdem(status)} 
-                        className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 transition-all ${filtroStatusOrdem === status ? 'bg-orange-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
-                      >
-                        {status}
-                        <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${filtroStatusOrdem === status ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                          {contagemOrdens[status]}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Tipos de Serviço */}
-                  <div className="flex flex-wrap p-1 bg-slate-900 rounded-xl border border-white/5 gap-1">
-                    {['Todos Tipos', 'Nova Ativação', 'Reparo Técnico', 'Mudança de Endereço', 'Recolha de Equipamento'].map(tipo => (
-                      <button 
-                        key={tipo} 
-                        onClick={() => setFiltroTipoOrdem(tipo)} 
-                        className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 transition-all ${filtroTipoOrdem === tipo ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
-                      >
-                        {tipo === 'Todos Tipos' ? 'Todos os Tipos' : tipo}
-                        <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${filtroTipoOrdem === tipo ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                          {contagemTipos[tipo]}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-              </div>
-
-              <div className="p-6 grid grid-cols-1 gap-4 custom-scrollbar overflow-y-auto max-h-[600px]">
-                {ordensFiltradas.map((o) => (
-                  <div key={o.id} className="bg-slate-900/50 p-6 rounded-2xl border border-white/5 flex flex-col lg:flex-row justify-between gap-6 hover:bg-white/5 transition-colors group">
-                    <div className="flex-1 space-y-3">
-                      <div className="flex items-center gap-3">
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest 
-                          ${o.tipo === 'Nova Ativação' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/20' : 
-                            o.tipo === 'Reparo Técnico' ? 'bg-red-500/20 text-red-400 border border-red-500/20' : 
-                            o.tipo === 'Mudança de Endereço' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' : 
-                            'bg-purple-500/20 text-purple-400 border border-purple-500/20'}`}>
-                          {o.tipo}
-                        </span>
-                        <h3 className="text-lg font-bold text-white uppercase">{o.nome}</h3>
-                      </div>
-                      
-                      <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-400 mt-4">
-                        <div className="flex items-center gap-1.5"><Wifi size={14} className="text-blue-500 shrink-0"/> {o.cto ? `${o.cto} / P${o.porta}` : 'Sem CTO informada'}</div>
-                        {o.serial && <div className="flex items-center gap-1.5 font-mono"><Info size={14} className="text-slate-500 shrink-0"/> SN: {o.serial}</div>}
-                        <div className="flex items-center gap-1.5"><CalendarClock size={14} className="text-slate-500 shrink-0"/> Agendado: {o.dataAgendada ? new Date(o.dataAgendada).toLocaleDateString('pt-BR') : 'Data em aberto'}</div>
-                      </div>
-                      
-                      {o.relato && (
-                        <div className="text-xs bg-black/20 p-4 rounded-xl border border-white/5 text-slate-300 italic mt-3 flex items-start gap-2">
-                          <Info size={14} className="text-orange-400 shrink-0 mt-0.5" />
-                          <span>{o.relato}</span>
+                      {/* Ações */}
+                      <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
+                        <button onClick={() => toggleConvertido(c.id, c.convertido)}
+                          style={{ fontSize:10, padding:'5px 10px', borderRadius:8, border:'none', cursor:'pointer', fontWeight:700, letterSpacing:'0.04em', textTransform:'uppercase', transition:'all 0.15s',
+                            background: c.convertido ? 'rgba(56,189,248,0.15)' : 'rgba(255,255,255,0.05)', color: c.convertido ? '#38bdf8' : '#475569' }}>
+                          {c.convertido ? '✓ Cliente' : '→ Converter'}
+                        </button>
+                        <div style={{ display:'flex', gap:4 }}>
+                          <button onClick={() => { setEditandoConsultaId(c.id); setConsulta({...c}); window.scrollTo({top:0,behavior:'smooth'}); }}
+                            style={{ padding:7, borderRadius:8, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer', color:'#64748b', display:'flex' }}>
+                            <Edit size={15}/>
+                          </button>
+                          <button onClick={() => excluirConsulta(c.id)}
+                            style={{ padding:7, borderRadius:8, background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.12)', cursor:'pointer', color:'#f87171', display:'flex' }}>
+                            <Trash2 size={15}/>
+                          </button>
                         </div>
-                      )}
-                    </div>
-
-                    <div className="flex lg:flex-col justify-between items-end gap-4 min-w-[150px]">
-                      <button onClick={() => alterarStatusOrdem(o.id, o.status)} className={`w-full py-3 px-4 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 border transition-all active:scale-95
-                        ${o.status === 'Pendente' ? 'bg-orange-500/10 border-orange-500/50 text-orange-400 hover:bg-orange-500 hover:text-white' : 
-                          o.status === 'Concluído' ? 'bg-green-500/10 border-green-500/50 text-green-400 hover:bg-green-500 hover:text-white' : 
-                          'bg-blue-500/10 border-blue-500/50 text-blue-400 hover:bg-blue-500 hover:text-white'}`}>
-                        {o.status === 'Pendente' && <Clock size={14} />}
-                        {o.status === 'Concluído' && <CheckCircle2 size={14} />}
-                        {o.status === 'Pago' && <DollarSign size={14} />}
-                        {o.status}
-                      </button>
-
-                      <div className="flex gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => { setEditandoOrdemId(o.id); setOrdem(o); window.scrollTo({top: 0, behavior: 'smooth'}); }} className="p-2.5 text-slate-500 hover:text-orange-400 bg-slate-800 rounded-lg hover:bg-slate-700 transition-all"><Edit size={18} /></button>
-                        <button onClick={() => excluirOrdem(o.id)} className="p-2.5 text-slate-500 hover:text-red-500 bg-slate-800 rounded-lg hover:bg-slate-700 transition-all"><Trash2 size={18} /></button>
                       </div>
                     </div>
                   </div>
                 ))}
-                {ordensFiltradas.length === 0 && <div className="text-center p-12 text-slate-500 text-xs font-black tracking-widest uppercase opacity-50 border border-dashed border-white/10 rounded-2xl">Nenhuma OS encontrada para este filtro</div>}
+                {consultasFiltradas.length === 0 && (
+                  <div style={{ textAlign:'center', padding:'48px 0', color:'#334155', fontSize:'12px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em', border:'1px dashed rgba(255,255,255,0.06)', borderRadius:16 }}>
+                    <FileSearch size={28} color="#1e293b" style={{ margin:'0 auto 12px', display:'block' }}/>
+                    Nenhuma consulta encontrada
+                  </div>
+                )}
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* TELA: CLIENTES E CTO */}
-        {telaAtual === 'clientes' && (
-          <div className="animate-in fade-in duration-700">
-            <button onClick={() => setTelaAtual('menu')} className="mb-6 text-blue-400 font-bold flex items-center gap-2 hover:text-blue-300 transition-colors"><LayoutDashboard size={18} /> Voltar ao Painel</button>
+      {/* ========================== BOBINAS ========================== */}
+      {telaAtual === 'bobinas' && (
+        <div className="animate-page">
+          <button onClick={() => setTelaAtual('menu')} style={{ marginBottom:24, color:'#10b981', fontWeight:700, fontSize:'13px', display:'flex', alignItems:'center', gap:6, background:'none', border:'none', cursor:'pointer' }}>
+            <LayoutDashboard size={16}/> Voltar ao Painel
+          </button>
 
-            {/* Formulário de Clientes */}
-            <div className="glass p-8 rounded-3xl mb-10 shadow-2xl border border-white/5">
-              <div className="flex items-center gap-2 mb-8 border-b border-white/5 pb-4">
-                {editandoClienteId ? <Edit className="text-orange-400" /> : <Wifi className="text-blue-500" />}
-                <h2 className="text-xl font-black uppercase tracking-tight">{editandoClienteId ? "Editar Cliente" : "Novo Cadastro de Rede"}</h2>
+          <div style={{ display:'grid', gridTemplateColumns:'320px 1fr', gap:24 }}>
+            {/* Form Bobinas */}
+            <div className="glass" style={{ borderRadius:24, padding:28, borderColor:'rgba(16,185,129,0.15)', height:'fit-content' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:24, paddingBottom:16, borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                <Plus size={18} color="#10b981"/>
+                <h2 style={{ fontSize:'15px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.06em', margin:0, color:'white' }}>Nova Bobina</h2>
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Assinante</label><input type="text" placeholder="Nome completo..." className="p-4 rounded-2xl" value={cliente.nome} onChange={e => setCliente({...cliente, nome: e.target.value})} /></div>
-                <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Serial (SN ONU)</label><input type="text" placeholder="ZTEG..." className="p-4 rounded-2xl font-mono tracking-widest" value={cliente.serial} onChange={e => setCliente({...cliente, serial: e.target.value})} /></div>
-                <div className="flex flex-col gap-1.5"><label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Login PPPoE</label><input type="text" placeholder="user@lumix..." className="p-4 rounded-2xl" value={cliente.login} onChange={e => setCliente({...cliente, login: e.target.value})} /></div>
-                
-                <div className="flex flex-col gap-1.5 lg:col-span-1">
-                  <label className="text-[10px] font-black text-slate-500 ml-2 uppercase">CTO / Porta (P)</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    <input type="text" placeholder="Caixa CTO" className="col-span-3 p-4 rounded-2xl" value={cliente.cto} onChange={e => setCliente({...cliente, cto: e.target.value})} />
-                    <input type="text" placeholder="P" className="col-span-1 p-4 rounded-2xl text-center font-black" value={cliente.porta} onChange={e => setCliente({...cliente, porta: e.target.value})} />
-                  </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                <div style={fieldWrap}><p className="field-label">Identificação</p><input style={inputStyle} type="text" placeholder="Ex: Bobina 01 — Carro do João" value={bobina.identificacao} onChange={e => setBobina({...bobina, identificacao:e.target.value})}/></div>
+                <div style={fieldWrap}><p className="field-label">Tipo de Cabo</p><select style={inputStyle} value={bobina.tipo} onChange={e => setBobina({...bobina, tipo:e.target.value})}><option>Drop 1FO</option><option>AS-80 6FO</option><option>AS-80 12FO</option></select></div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                  <div style={fieldWrap}><p className="field-label">Total (m)</p><input style={inputStyle} type="number" placeholder="1000" value={bobina.total} onChange={e => setBobina({...bobina, total:e.target.value})}/></div>
+                  <div style={fieldWrap}><p className="field-label">Já Usado (m)</p><input style={inputStyle} type="number" placeholder="0" value={bobina.usado} onChange={e => setBobina({...bobina, usado:e.target.value})}/></div>
                 </div>
-
-                <div className="flex flex-col gap-1.5 md:col-span-2"><label className="text-[10px] font-black text-slate-500 ml-2 uppercase">Observação Técnica</label><textarea placeholder="Ex: Roteador próprio, sinal -18db..." className="p-4 rounded-2xl h-14 resize-none" value={cliente.observacao} onChange={e => setCliente({...cliente, observacao: e.target.value})} /></div>
-
-                <button onClick={salvarCliente} className="lg:col-span-3 bg-blue-600 text-white p-5 rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-blue-700 transition-all uppercase tracking-widest mt-2 active:scale-95"><Save size={22} /> {editandoClienteId ? "Atualizar Registo" : "Salvar no Sistema"}</button>
-                {editandoClienteId && <button onClick={() => { setEditandoClienteId(null); setCliente({nome:'', login:'', serial:'', cto:'', porta:'', observacao:'', status:'Ativo'}); }} className="lg:col-span-3 text-slate-500 text-xs font-bold uppercase hover:text-white transition-colors">Cancelar Edição</button>}
+                <div style={fieldWrap}><p className="field-label">Marca / Fornecedor</p><input style={inputStyle} type="text" placeholder="Furukawa, Prysmian..." value={bobina.marca} onChange={e => setBobina({...bobina, marca:e.target.value})}/></div>
+                <button onClick={salvarBobina} className="btn-primary" style={{ background:'linear-gradient(135deg,#059669,#10b981)', color:'white', marginTop:4 }}>
+                  <Save size={18}/> Registrar Bobina
+                </button>
               </div>
             </div>
 
-            {/* Listagem de Clientes */}
-            <div className="glass rounded-3xl overflow-hidden shadow-2xl border border-white/5">
-              <div className="p-6 bg-slate-800/50 border-b border-white/5 flex flex-col lg:flex-row justify-between gap-6">
-                <div className="relative flex-1"><Search className="absolute left-4 top-4 text-slate-500" size={20} /><input type="text" placeholder="Filtrar por nome, SN ou login..." className="w-full pl-12 p-4 rounded-2xl outline-none" value={buscaCliente} onChange={e => setBuscaCliente(e.target.value)} /></div>
-                <div className="flex flex-wrap gap-2 items-center">
-                  <div className="flex p-1 bg-slate-900 rounded-xl border border-white/5 mr-2 gap-1">
-                    {['Todos', 'Desativado'].map(status => (
-                      <button 
-                        key={status} 
-                        onClick={() => setFiltroStatusCliente(status)} 
-                        className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 transition-all ${filtroStatusCliente === status ? (status === 'Desativado' ? 'bg-red-600 text-white shadow-lg' : 'bg-blue-600 text-white shadow-lg') : 'text-slate-500 hover:text-white'}`}
-                      >
-                        {status === 'Desativado' ? 'Desativados' : 'Todos'}
-                        <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${filtroStatusCliente === status ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                          {contagemClientes[status]}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={() => exportarRelatorio('excel')} className="bg-green-600/20 text-green-400 p-3 rounded-xl hover:bg-green-600 hover:text-white transition-all"><Download size={18} /></button>
-                  <button onClick={() => exportarRelatorio('pdf')} className="bg-red-600/20 text-red-400 p-3 rounded-xl hover:bg-red-600 hover:text-white transition-all"><Printer size={18} /></button>
-                </div>
+            {/* Lista Bobinas */}
+            <div className="glass" style={{ borderRadius:24, padding:24, borderColor:'rgba(255,255,255,0.05)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:20, paddingBottom:16, borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                <Layers size={18} color="#10b981"/>
+                <h2 style={{ fontSize:'15px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.06em', margin:0, color:'white' }}>Estoque em Campo</h2>
               </div>
-
-              <div className="overflow-x-auto custom-scrollbar">
-                <table className="w-full text-left">
-                  <thead><tr className="bg-slate-900/50 text-slate-500 text-[10px] uppercase font-black tracking-widest border-b border-white/5"><th className="p-6">Assinante / Detalhes</th><th className="p-6">CTO / Porta</th><th className="p-6 text-center">Ações</th></tr></thead>
-                  <tbody className="divide-y divide-white/5">
-                    {clientesFiltrados.map((c) => (
-                      <tr key={c.id} className={`hover:bg-white/5 transition-colors ${c.status === 'Desativado' ? 'bg-red-900/5 opacity-80' : ''}`}>
-                        <td className="p-6"><div className="flex items-center gap-4">
-                          <div className="min-w-0">
-                            <div className={`text-base font-bold truncate ${c.status === 'Desativado' ? 'line-through text-slate-500' : 'text-white'}`}>{c.nome}</div>
-                            <div className="text-[10px] font-mono text-slate-500 uppercase mt-1 tracking-wider">{c.serial} <span className="mx-1">|</span> {c.login}</div>
-                            {c.observacao && <div className="mt-2 text-[11px] italic text-blue-400 flex items-start gap-1 bg-blue-500/5 p-2 rounded-lg border border-blue-500/10"><Info size={12} className="mt-0.5 shrink-0" /> {c.observacao}</div>}
+              <div style={{ display:'flex', flexDirection:'column', gap:12 }} className="custom-scrollbar">
+                {bobinas.map(b => {
+                  const restante = b.total - b.usado;
+                  const perc = Math.min((b.usado / b.total) * 100, 100);
+                  const barColor = perc > 90 ? '#ef4444' : perc > 75 ? '#f59e0b' : '#10b981';
+                  return (
+                    <div key={b.id} style={{ background:'rgba(8,12,20,0.5)', borderRadius:16, padding:'18px 20px', border:'1px solid rgba(255,255,255,0.04)', borderLeft:`3px solid #10b981` }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
+                        <div>
+                          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                            <h3 style={{ fontSize:'14px', fontWeight:700, color:'white', margin:0, textTransform:'uppercase' }}>{b.identificacao}</h3>
+                            <span style={{ fontSize:10, padding:'2px 8px', borderRadius:6, background:'rgba(16,185,129,0.12)', color:'#34d399', border:'1px solid rgba(16,185,129,0.2)', fontWeight:700 }}>{b.tipo}</span>
                           </div>
-                        </div></td>
-                        <td className="p-6"><div className="inline-flex items-center gap-2 bg-blue-600/10 text-blue-400 px-4 py-2 rounded-xl text-xs font-black uppercase"><Wifi size={14} /> {c.cto} <span className="text-slate-600 mx-1">/</span> P{c.porta}</div></td>
-                        <td className="p-6"><div className="flex items-center justify-end gap-2 md:gap-3">
-                           <button onClick={() => alternarStatusCliente(c.id, c.status)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all shadow-sm ${c.status === 'Ativo' ? 'bg-green-500/20 text-green-400 hover:bg-green-500 hover:text-white border border-green-500/20' : 'bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white border border-red-500/20'}`}>
-                             {c.status === 'Ativo' ? <CheckCircle size={14} /> : <XCircle size={14} />} {c.status}
-                           </button>
-                           <button onClick={() => { setEditandoClienteId(c.id); setCliente(c); window.scrollTo({top:0, behavior:'smooth'}); }} className="text-slate-500 hover:text-orange-400 p-2 hover:bg-orange-400/10 rounded-lg"><Edit size={20} /></button>
-                           <button onClick={() => excluirCliente(c.id)} className="text-slate-500 hover:text-red-500 p-2 hover:bg-red-500/10 rounded-lg"><Trash2 size={20} /></button>
-                        </div></td>
-                      </tr>
-                    ))}
-                    {clientesFiltrados.length === 0 && <tr><td colSpan="3" className="p-20 text-center text-slate-500 italic uppercase text-xs tracking-widest font-black opacity-30">Nenhum cliente encontrado</td></tr>}
-                  </tbody>
-                </table>
+                          <p style={{ fontSize:10, color:'#475569', margin:0, fontFamily:'monospace', textTransform:'uppercase', letterSpacing:'0.05em' }}>Marca: {b.marca || 'N/A'}</p>
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
+                          <span style={{ fontSize:'22px', fontWeight:800, color:'#10b981', lineHeight:1 }}>{restante}<small style={{ fontSize:'11px', fontWeight:500, color:'#475569' }}>m</small></span>
+                          <span style={{ fontSize:'9px', color:'#475569', textTransform:'uppercase', letterSpacing:'0.08em' }}>restantes</span>
+                        </div>
+                      </div>
+                      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                        <span style={{ fontSize:10, color:'#475569', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em' }}>Usado: {b.usado}m ({perc.toFixed(1)}%)</span>
+                        <button onClick={() => excluirBobina(b.id)} style={{ padding:'2px 6px', borderRadius:6, background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.15)', cursor:'pointer', color:'#f87171', display:'flex', alignItems:'center' }}>
+                          <Trash2 size={13}/>
+                        </button>
+                      </div>
+                      <div className="progress-bar" style={{ marginBottom:12 }}>
+                        <div style={{ height:'100%', width:`${perc}%`, background:barColor, borderRadius:3, transition:'width 0.6s ease' }}/>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, background:'rgba(255,255,255,0.02)', padding:'10px 12px', borderRadius:10, border:'1px solid rgba(255,255,255,0.04)' }}>
+                        <span style={{ fontSize:10, color:'#64748b', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', flexShrink:0 }}>Descontar uso (m):</span>
+                        <input id={`desc-${b.id}`} type="number" placeholder="120" style={{ flex:1, padding:'6px 10px', borderRadius:8, fontSize:13, textAlign:'center', fontWeight:700, background:'rgba(8,12,20,0.8)', color:'white', border:'1px solid rgba(255,255,255,0.08)', outline:'none' }}/>
+                        <button onClick={() => { const el = document.getElementById(`desc-${b.id}`); if(el?.value) { registrarUso(b.id, b.usado, el.value); el.value=''; }}}
+                          style={{ padding:'6px 14px', borderRadius:8, background:'#059669', color:'white', border:'none', cursor:'pointer', fontSize:11, fontWeight:800, textTransform:'uppercase', letterSpacing:'0.05em', flexShrink:0 }}>
+                          OK
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {bobinas.length === 0 && (
+                  <div style={{ textAlign:'center', padding:'48px 0', color:'#334155', fontSize:'12px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em', border:'1px dashed rgba(255,255,255,0.06)', borderRadius:16 }}>
+                    <Database size={28} color="#1e293b" style={{ margin:'0 auto 12px', display:'block' }}/>
+                    Nenhuma bobina cadastrada
+                  </div>
+                )}
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-      </div>
+      {/* ========================== SUPORTE ========================== */}
+      {telaAtual === 'suporte' && (
+        <div className="animate-page">
+          <button onClick={() => setTelaAtual('menu')} style={{ marginBottom:24, color:'#f59e0b', fontWeight:700, fontSize:'13px', display:'flex', alignItems:'center', gap:6, background:'none', border:'none', cursor:'pointer' }}>
+            <LayoutDashboard size={16}/> Voltar ao Painel
+          </button>
+
+          {/* Form OS */}
+          <div className="glass" style={{ borderRadius:24, padding:28, marginBottom:24, borderColor:'rgba(245,158,11,0.12)' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:24, paddingBottom:16, borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+              <Wrench size={18} color="#f59e0b"/>
+              <h2 style={{ fontSize:'15px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.06em', margin:0, color:'white' }}>{editandoOrdemId ? 'Editar OS' : 'Nova Ordem de Serviço'}</h2>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))', gap:14 }}>
+              <div style={fieldWrap}><p className="field-label">Nome do Cliente</p><input style={inputStyle} type="text" placeholder="Nome completo..." value={ordem.nome} onChange={e => setOrdem({...ordem, nome:e.target.value})}/></div>
+              <div style={fieldWrap}><p className="field-label">Serial (SN ONU)</p><input style={{...inputStyle, fontFamily:'monospace'}} type="text" placeholder="ZTEG..." value={ordem.serial} onChange={e => setOrdem({...ordem, serial:e.target.value})}/></div>
+              <div style={fieldWrap}>
+                <p className="field-label">CTO / Porta</p>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 60px', gap:8 }}>
+                  <input style={inputStyle} type="text" placeholder="CTO..." value={ordem.cto} onChange={e => setOrdem({...ordem, cto:e.target.value})}/>
+                  <input style={{...inputStyle, textAlign:'center', fontWeight:800}} type="text" placeholder="P" value={ordem.porta} onChange={e => setOrdem({...ordem, porta:e.target.value})}/>
+                </div>
+              </div>
+              <div style={fieldWrap}><p className="field-label">Tipo de Serviço</p><select style={inputStyle} value={ordem.tipo} onChange={e => setOrdem({...ordem, tipo:e.target.value})}><option>Nova Ativação</option><option>Reparo Técnico</option><option>Mudança de Endereço</option><option>Recolha de Equipamento</option></select></div>
+              <div style={fieldWrap}><p className="field-label">Data Agendada</p><input style={inputStyle} type="date" value={ordem.dataAgendada} onChange={e => setOrdem({...ordem, dataAgendada:e.target.value})}/></div>
+              <div style={{...fieldWrap, gridColumn:'1/-1'}}><p className="field-label">Relato / Observações</p><textarea style={{...inputStyle, height:72, resize:'none'}} placeholder="Descreva o problema..." value={ordem.relato} onChange={e => setOrdem({...ordem, relato:e.target.value})}/></div>
+              <button onClick={salvarOrdem} className="btn-primary" style={{ gridColumn:'1/-1', background:'linear-gradient(135deg,#d97706,#f59e0b)', color:'white' }}>
+                <ClipboardList size={18}/> {editandoOrdemId ? 'Atualizar OS' : 'Gerar Ordem de Serviço'}
+              </button>
+              {editandoOrdemId && <button onClick={() => { setEditandoOrdemId(null); setOrdem({nome:'',serial:'',cto:'',porta:'',tipo:'Nova Ativação',dataAgendada:'',relato:'',status:'Pendente'}); }} style={{ gridColumn:'1/-1', background:'none', border:'none', color:'#475569', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', cursor:'pointer' }}>Cancelar Edição</button>}
+            </div>
+          </div>
+
+          {/* Lista OS */}
+          <div className="glass" style={{ borderRadius:24, overflow:'hidden', borderColor:'rgba(255,255,255,0.05)' }}>
+            <div style={{ padding:'20px 24px', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ position:'relative', marginBottom:12 }}>
+                <Search size={16} color="#475569" style={{ position:'absolute', left:14, top:'50%', transform:'translateY(-50%)' }}/>
+                <input style={{...inputStyle, paddingLeft:42}} type="text" placeholder="Buscar OS..." value={buscaOrdem} onChange={e => setBuscaOrdem(e.target.value)}/>
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                <div style={{ display:'flex', gap:4, padding:4, background:'rgba(8,12,20,0.6)', borderRadius:12, border:'1px solid rgba(255,255,255,0.05)' }}>
+                  {['Todos','Pendente','Concluído','Pago'].map(s => (
+                    <button key={s} onClick={() => setFiltroStatusOrdem(s)} style={btnTab(filtroStatusOrdem===s,'#d97706')}>
+                      {s} <span style={{ fontSize:9, padding:'1px 5px', borderRadius:4, background: filtroStatusOrdem===s ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)', color: filtroStatusOrdem===s?'white':'#475569' }}>{countOrdens[s]}</span>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display:'flex', gap:4, padding:4, background:'rgba(8,12,20,0.6)', borderRadius:12, border:'1px solid rgba(255,255,255,0.05)' }}>
+                  {['Todos Tipos','Nova Ativação','Reparo Técnico','Mudança de Endereço','Recolha de Equipamento'].map(t => (
+                    <button key={t} onClick={() => setFiltroTipoOrdem(t)} style={btnTab(filtroTipoOrdem===t,'#4f46e5')}>
+                      {t==='Todos Tipos'?'Todos':t} <span style={{ fontSize:9, padding:'1px 5px', borderRadius:4, background: filtroTipoOrdem===t ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)', color: filtroTipoOrdem===t?'white':'#475569' }}>{countTipos[t]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:10, overflowY:'auto', maxHeight:560 }} className="custom-scrollbar">
+              {ordensFiltradas.map(o => {
+                const tipoCor = { 'Nova Ativação':'#3b82f6', 'Reparo Técnico':'#ef4444', 'Mudança de Endereço':'#f59e0b', 'Recolha de Equipamento':'#a78bfa' };
+                const cor = tipoCor[o.tipo] || '#64748b';
+                return (
+                  <div key={o.id} style={{ background:'rgba(8,12,20,0.5)', borderRadius:16, padding:'16px 20px', border:'1px solid rgba(255,255,255,0.04)', borderLeft:`3px solid ${cor}`, display:'flex', justifyContent:'space-between', gap:16, alignItems:'flex-start' }} className="table-row">
+                    <div style={{ flex:1 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8, flexWrap:'wrap' }}>
+                        <span style={{ fontSize:10, padding:'3px 8px', borderRadius:6, background:`${cor}18`, color:cor, border:`1px solid ${cor}30`, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em' }}>{o.tipo}</span>
+                        <h3 style={{ fontSize:'15px', fontWeight:700, color:'white', margin:0 }}>{o.nome}</h3>
+                      </div>
+                      <div style={{ display:'flex', gap:16, flexWrap:'wrap', fontSize:11, color:'#64748b', marginBottom: o.relato?8:0 }}>
+                        <span style={{ display:'flex', alignItems:'center', gap:4 }}><Wifi size={12} color="#3b82f6"/> {o.cto?`${o.cto}/P${o.porta}`:'Sem CTO'}</span>
+                        {o.serial && <span style={{ fontFamily:'monospace' }}>SN: {o.serial}</span>}
+                        <span style={{ display:'flex', alignItems:'center', gap:4 }}><CalendarClock size={12}/> {o.dataAgendada ? new Date(o.dataAgendada).toLocaleDateString('pt-BR') : 'Data em aberto'}</span>
+                      </div>
+                      {o.relato && <div style={{ fontSize:11, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:'6px 10px', color:'#94a3b8', fontStyle:'italic', display:'flex', gap:6 }}><Info size={12} style={{ flexShrink:0, marginTop:1 }}/>{o.relato}</div>}
+                    </div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end', minWidth:140 }}>
+                      <button onClick={() => alterarStatusOrdem(o.id, o.status)} style={{ width:'100%', padding:'8px 12px', borderRadius:10, border:'none', cursor:'pointer', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', display:'flex', alignItems:'center', justifyContent:'center', gap:6, transition:'all 0.15s',
+                        background: o.status==='Pendente'?'rgba(245,158,11,0.12)':o.status==='Concluído'?'rgba(34,197,94,0.12)':'rgba(59,130,246,0.12)',
+                        color: o.status==='Pendente'?'#fbbf24':o.status==='Concluído'?'#4ade80':'#60a5fa',
+                        border: `1px solid ${o.status==='Pendente'?'rgba(245,158,11,0.25)':o.status==='Concluído'?'rgba(34,197,94,0.25)':'rgba(59,130,246,0.25)'}` }}>
+                        {o.status==='Pendente'&&<Clock size={13}/>}{o.status==='Concluído'&&<CheckCircle2 size={13}/>}{o.status==='Pago'&&<DollarSign size={13}/>} {o.status}
+                      </button>
+                      <div style={{ display:'flex', gap:4 }}>
+                        <button onClick={() => { setEditandoOrdemId(o.id); setOrdem(o); window.scrollTo({top:0,behavior:'smooth'}); }} style={{ padding:7, borderRadius:8, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer', color:'#64748b', display:'flex' }}><Edit size={15}/></button>
+                        <button onClick={() => excluirOrdem(o.id)} style={{ padding:7, borderRadius:8, background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.12)', cursor:'pointer', color:'#f87171', display:'flex' }}><Trash2 size={15}/></button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {ordensFiltradas.length === 0 && <div style={{ textAlign:'center', padding:'48px 0', color:'#334155', fontSize:'12px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em', border:'1px dashed rgba(255,255,255,0.06)', borderRadius:16 }}>Nenhuma OS encontrada</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================== CLIENTES ========================== */}
+      {telaAtual === 'clientes' && (
+        <div className="animate-page">
+          <button onClick={() => setTelaAtual('menu')} style={{ marginBottom:24, color:'#3b82f6', fontWeight:700, fontSize:'13px', display:'flex', alignItems:'center', gap:6, background:'none', border:'none', cursor:'pointer' }}>
+            <LayoutDashboard size={16}/> Voltar ao Painel
+          </button>
+
+          {/* Form Clientes */}
+          <div className="glass" style={{ borderRadius:24, padding:28, marginBottom:24, borderColor:'rgba(59,130,246,0.12)' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:24, paddingBottom:16, borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+              {editandoClienteId ? <Edit size={18} color="#f59e0b"/> : <Wifi size={18} color="#3b82f6"/>}
+              <h2 style={{ fontSize:'15px', fontWeight:800, textTransform:'uppercase', letterSpacing:'0.06em', margin:0, color:'white' }}>{editandoClienteId ? 'Editar Cliente' : 'Novo Cadastro de Rede'}</h2>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))', gap:14 }}>
+              <div style={fieldWrap}><p className="field-label">Assinante</p><input style={inputStyle} type="text" placeholder="Nome completo..." value={cliente.nome} onChange={e => setCliente({...cliente, nome:e.target.value})}/></div>
+              <div style={fieldWrap}><p className="field-label">Serial (SN ONU)</p><input style={{...inputStyle, fontFamily:'monospace'}} type="text" placeholder="ZTEG..." value={cliente.serial} onChange={e => setCliente({...cliente, serial:e.target.value})}/></div>
+              <div style={fieldWrap}><p className="field-label">Login PPPoE</p><input style={inputStyle} type="text" placeholder="user@lumix..." value={cliente.login} onChange={e => setCliente({...cliente, login:e.target.value})}/></div>
+              <div style={fieldWrap}>
+                <p className="field-label">CTO / Porta</p>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 60px', gap:8 }}>
+                  <input style={inputStyle} type="text" placeholder="CTO..." value={cliente.cto} onChange={e => setCliente({...cliente, cto:e.target.value})}/>
+                  <input style={{...inputStyle, textAlign:'center', fontWeight:800}} type="text" placeholder="P" value={cliente.porta} onChange={e => setCliente({...cliente, porta:e.target.value})}/>
+                </div>
+              </div>
+              <div style={{...fieldWrap, gridColumn:'1/-1'}}><p className="field-label">Observação Técnica</p><textarea style={{...inputStyle, height:64, resize:'none'}} placeholder="Ex: Roteador próprio, sinal -18db..." value={cliente.observacao} onChange={e => setCliente({...cliente, observacao:e.target.value})}/></div>
+              <button onClick={salvarCliente} className="btn-primary" style={{ gridColumn:'1/-1', background:'linear-gradient(135deg,#1d4ed8,#3b82f6)', color:'white' }}>
+                <Save size={18}/> {editandoClienteId ? 'Atualizar Registo' : 'Salvar Cliente'}
+              </button>
+              {editandoClienteId && <button onClick={() => { setEditandoClienteId(null); setCliente({nome:'',login:'',serial:'',cto:'',porta:'',observacao:'',status:'Ativo'}); }} style={{ gridColumn:'1/-1', background:'none', border:'none', color:'#475569', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em', cursor:'pointer' }}>Cancelar Edição</button>}
+            </div>
+          </div>
+
+          {/* Lista Clientes */}
+          <div className="glass" style={{ borderRadius:24, overflow:'hidden', borderColor:'rgba(255,255,255,0.05)' }}>
+            <div style={{ padding:'20px 24px', borderBottom:'1px solid rgba(255,255,255,0.05)', display:'flex', flexWrap:'wrap', gap:12, alignItems:'center' }}>
+              <div style={{ position:'relative', flex:1, minWidth:220 }}>
+                <Search size={16} color="#475569" style={{ position:'absolute', left:14, top:'50%', transform:'translateY(-50%)' }}/>
+                <input style={{...inputStyle, paddingLeft:42}} type="text" placeholder="Buscar por nome, SN ou login..." value={buscaCliente} onChange={e => setBuscaCliente(e.target.value)}/>
+              </div>
+              <div style={{ display:'flex', gap:4, padding:4, background:'rgba(8,12,20,0.6)', borderRadius:12, border:'1px solid rgba(255,255,255,0.05)' }}>
+                {['Todos','Ativo','Desativado'].map(s => (
+                  <button key={s} onClick={() => setFiltroStatusCliente(s)} style={btnTab(filtroStatusCliente===s, s==='Desativado'?'#dc2626':'#1d4ed8')}>
+                    {s} <span style={{ fontSize:9, padding:'1px 5px', borderRadius:4, background: filtroStatusCliente===s?'rgba(255,255,255,0.2)':'rgba(255,255,255,0.05)', color: filtroStatusCliente===s?'white':'#475569' }}>
+                      {s==='Todos'?clientes.length:clientes.filter(c=>c.status===s).length}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => exportarRelatorio('excel')} style={{ padding:'8px 12px', borderRadius:10, background:'rgba(34,197,94,0.1)', color:'#4ade80', border:'1px solid rgba(34,197,94,0.2)', cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em' }}><Download size={14}/> CSV</button>
+              <button onClick={() => exportarRelatorio('pdf')} style={{ padding:'8px 12px', borderRadius:10, background:'rgba(239,68,68,0.1)', color:'#f87171', border:'1px solid rgba(239,68,68,0.2)', cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em' }}><Printer size={14}/> PDF</button>
+            </div>
+
+            <div style={{ overflowX:'auto' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                <thead>
+                  <tr style={{ background:'rgba(8,12,20,0.4)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                    {['Assinante / Detalhes','CTO / Porta','Status / Ações'].map(h => (
+                      <th key={h} style={{ padding:'14px 20px', textAlign:'left', fontSize:10, fontWeight:700, color:'#475569', textTransform:'uppercase', letterSpacing:'0.08em' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientesFiltrados.map(c => (
+                    <tr key={c.id} className="table-row" style={{ borderBottom:'1px solid rgba(255,255,255,0.03)', opacity: c.status==='Desativado' ? 0.6 : 1 }}>
+                      <td style={{ padding:'14px 20px' }}>
+                        <div style={{ fontWeight:700, fontSize:'14px', color: c.status==='Desativado'?'#475569':'white', textDecoration: c.status==='Desativado'?'line-through':'none', marginBottom:3 }}>{c.nome}</div>
+                        <div style={{ fontSize:10, fontFamily:'monospace', color:'#475569', letterSpacing:'0.05em', textTransform:'uppercase' }}>{c.serial} | {c.login}</div>
+                        {c.observacao && <div style={{ marginTop:4, fontSize:11, color:'#3b82f6', display:'flex', alignItems:'flex-start', gap:4 }}><Info size={11} style={{ flexShrink:0, marginTop:1 }}/>{c.observacao}</div>}
+                      </td>
+                      <td style={{ padding:'14px 20px' }}>
+                        <div style={{ display:'inline-flex', alignItems:'center', gap:6, background:'rgba(59,130,246,0.1)', color:'#60a5fa', padding:'6px 12px', borderRadius:10, fontSize:11, fontWeight:700 }}>
+                          <Wifi size={13}/> {c.cto} / P{c.porta}
+                        </div>
+                      </td>
+                      <td style={{ padding:'14px 20px' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'flex-end' }}>
+                          <button onClick={() => alternarStatusCliente(c.id, c.status)} style={{ display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:8, border:'none', cursor:'pointer', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.04em', transition:'all 0.15s',
+                            background: c.status==='Ativo'?'rgba(34,197,94,0.12)':'rgba(239,68,68,0.12)', color: c.status==='Ativo'?'#4ade80':'#f87171', border: `1px solid ${c.status==='Ativo'?'rgba(34,197,94,0.25)':'rgba(239,68,68,0.25)'}` }}>
+                            {c.status==='Ativo'?<CheckCircle size={13}/>:<XCircle size={13}/>} {c.status}
+                          </button>
+                          <button onClick={() => { setEditandoClienteId(c.id); setCliente(c); window.scrollTo({top:0,behavior:'smooth'}); }} style={{ padding:7, borderRadius:8, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)', cursor:'pointer', color:'#64748b', display:'flex' }}><Edit size={15}/></button>
+                          <button onClick={() => excluirCliente(c.id)} style={{ padding:7, borderRadius:8, background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.12)', cursor:'pointer', color:'#f87171', display:'flex' }}><Trash2 size={15}/></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {clientesFiltrados.length === 0 && (
+                    <tr><td colSpan={3} style={{ padding:'48px 0', textAlign:'center', color:'#334155', fontSize:12, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.1em' }}>Nenhum cliente encontrado</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
