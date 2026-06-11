@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import {
   Save, Search, Trash2, Edit, Info, CheckCircle, XCircle, Users,
   Download, Printer, Wifi, LayoutDashboard, ClipboardList,
@@ -11,369 +10,9 @@ import {
   Activity, Boxes, ArrowRight, Phone, PackageX, RefreshCw,
   HardDrive, PackagePlus, PackageCheck, Undo2, Link2, ClipboardCheck, CircleDashed
 } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
-// --- CONFIGURAÇÃO FIREBASE ---
-const firebaseConfig = {
-  apiKey: "AIzaSyBX7mv26WPpYNBVpfQufvpdZdQVtSAITZs",
-  authDomain: "lumix-doc.firebaseapp.com",
-  projectId: "lumix-doc",
-  storageBucket: "lumix-doc.firebasestorage.app",
-  messagingSenderId: "625727333695",
-  appId: "1:625727333695:web:62efac7740bdf7d3391f8a"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-// --- CORES DOS MÓDULOS ---
-const CORES = {
-  dashboard: '#6366f1',
-  clientes: '#3b82f6',
-  suporte:  '#f59e0b',
-  bobinas:  '#10b981',
-  serasa:   '#a855f7',
-  estoque:  '#22d3ee',
-};
-
-const ONT_MODELOS = ['ZTE F660', 'ZTE F670L', 'Huawei EG8145V5', 'Huawei HG8546M', 'Nokia G-1425G-A', 'Intelbras 110G', 'Fiberhome AN5506'];
-
-// --- HELPERS DE FORMATAÇÃO ---
-const formatarCPF = (valor) => {
-  const nums = valor.replace(/\D/g, '').slice(0, 11);
-  return nums
-    .replace(/(\d{3})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
-};
-
-const formatarCNPJ = (valor) => {
-  const nums = valor.replace(/\D/g, '').slice(0, 14);
-  return nums
-    .replace(/(\d{2})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d)/, '$1.$2')
-    .replace(/(\d{3})(\d)/, '$1/$2')
-    .replace(/(\d{4})(\d{1,2})$/, '$1-$2');
-};
-
-const formatarDocumento = (valor, tipo) => {
-  if (tipo === 'CPF') return formatarCPF(valor);
-  if (tipo === 'CNPJ') return formatarCNPJ(valor);
-  return valor;
-};
-
-const fmtBRL = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const fmtData = (d) => (d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '—');
-
-// ============================================================
-//  ESTILO GLOBAL — design system reformulado
-// ============================================================
-const GlobalStyle = () => (
-  <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
-
-    :root {
-      --bg:#070b14; --bg-2:#0b1120;
-      --surface:#0f1626; --surface-2:#141d31;
-      --border:rgba(255,255,255,.07); --border-2:rgba(255,255,255,.13);
-      --text:#e8edf7; --text-2:#9aa6bd; --text-3:#5b6783;
-      --primary:#6366f1; --primary-2:#818cf8;
-      --radius:16px; --radius-lg:22px; --radius-sm:11px;
-      --sidebar-w:250px;
-    }
-
-    * { box-sizing:border-box; margin:0; padding:0; }
-    html, body, #root { height:100%; }
-    body {
-      background:var(--bg); color:var(--text);
-      font-family:'Inter', system-ui, -apple-system, sans-serif;
-      line-height:1.5; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
-    }
-    body::before {
-      content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
-      background:
-        radial-gradient(920px 620px at 10% -8%, rgba(99,102,241,.16), transparent 60%),
-        radial-gradient(820px 600px at 100% 0%, rgba(168,85,247,.12), transparent 55%),
-        radial-gradient(760px 520px at 50% 112%, rgba(34,211,238,.07), transparent 60%);
-    }
-    .display { font-family:'Space Grotesk', sans-serif; }
-    ::selection { background:rgba(99,102,241,.35); }
-
-    /* ---- shell ---- */
-    .app-shell { display:grid; grid-template-columns:var(--sidebar-w) 1fr; min-height:100vh; }
-    .main { min-width:0; display:flex; flex-direction:column; }
-    .content { padding:28px 36px 90px; max-width:1280px; width:100%; margin:0 auto; }
-
-    /* ---- sidebar ---- */
-    .sidebar {
-      width:var(--sidebar-w); background:linear-gradient(180deg,#0c1322,#080d18);
-      border-right:1px solid var(--border); display:flex; flex-direction:column;
-      padding:22px 16px; gap:4px;
-    }
-    .brand { display:flex; align-items:center; gap:12px; padding:4px 6px 20px; cursor:pointer; }
-    .brand-mark {
-      width:42px; height:42px; border-radius:13px; flex-shrink:0;
-      background:linear-gradient(135deg,#6366f1,#a855f7); display:grid; place-items:center;
-      box-shadow:0 10px 26px -8px rgba(99,102,241,.7);
-    }
-    .nav-section { font-size:10px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; color:var(--text-3); padding:14px 12px 7px; }
-    .nav-item {
-      display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:12px;
-      color:var(--text-2); font-size:13.5px; font-weight:600; cursor:pointer; border:none;
-      background:transparent; width:100%; text-align:left; transition:all .15s; position:relative; font-family:inherit;
-    }
-    .nav-item:hover { background:rgba(255,255,255,.045); color:var(--text); }
-    .nav-item.active { background:rgba(255,255,255,.07); color:#fff; }
-    .nav-item.active::before { content:''; position:absolute; left:-16px; top:50%; transform:translateY(-50%); width:4px; height:22px; border-radius:0 4px 4px 0; background:var(--accent,#6366f1); }
-    .nav-badge { margin-left:auto; font-size:11px; font-weight:700; padding:2px 9px; border-radius:8px; background:rgba(255,255,255,.07); color:var(--text-2); }
-    .nav-item.active .nav-badge { background:var(--accent,#6366f1); color:#fff; }
-
-    /* ---- topbar ---- */
-    .topbar {
-      display:flex; align-items:center; gap:12px; padding:14px 24px;
-      border-bottom:1px solid var(--border); background:rgba(9,14,26,.72);
-      backdrop-filter:blur(14px); position:sticky; top:0; z-index:30;
-    }
-    .hamburger { display:none; }
-    .backdrop { display:none; }
-
-    /* ---- cards ---- */
-    .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); }
-    .glass { background:rgba(15,22,38,.7); backdrop-filter:blur(16px); border:1px solid var(--border); }
-    .kpi { background:linear-gradient(165deg,rgba(255,255,255,.045),rgba(255,255,255,.012)); border:1px solid var(--border); border-radius:18px; padding:18px 20px; transition:all .2s; }
-    .kpi:hover { border-color:var(--border-2); transform:translateY(-3px); }
-    .panel-head { display:flex; align-items:center; gap:9px; padding:18px 22px; border-bottom:1px solid var(--border); }
-    .panel-title { font-size:14px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:#fff; }
-
-    /* ---- buttons ---- */
-    .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:11px 18px; border-radius:12px; font-size:12px; font-weight:700; letter-spacing:.03em; cursor:pointer; border:1px solid transparent; transition:all .16s; font-family:inherit; white-space:nowrap; }
-    .btn:active { transform:scale(.97); }
-    .btn-primary { background:linear-gradient(135deg,#6366f1,#7c3aed); color:#fff; box-shadow:0 10px 22px -10px rgba(99,102,241,.8); }
-    .btn-primary:hover { filter:brightness(1.09); }
-    .btn-ghost { background:rgba(255,255,255,.04); color:var(--text-2); border-color:var(--border); }
-    .btn-ghost:hover { background:rgba(255,255,255,.08); color:var(--text); }
-    .btn-sm { padding:8px 13px; font-size:11px; border-radius:10px; }
-    .icon-btn { display:inline-grid; place-items:center; width:34px; height:34px; border-radius:10px; background:rgba(255,255,255,.04); border:1px solid var(--border); color:var(--text-2); cursor:pointer; transition:all .15s; }
-    .icon-btn:hover { background:rgba(255,255,255,.09); color:var(--text); }
-    .icon-btn.danger:hover { background:rgba(244,63,94,.14); color:#fb7185; border-color:rgba(244,63,94,.3); }
-
-    /* ---- inputs ---- */
-    .input { width:100%; padding:12px 14px; border-radius:12px; background:rgba(6,10,18,.75); border:1px solid var(--border); color:var(--text); font-size:14px; font-family:inherit; transition:all .16s; }
-    .input::placeholder { color:var(--text-3); }
-    .input:focus { outline:none; border-color:rgba(99,102,241,.6); box-shadow:0 0 0 3px rgba(99,102,241,.16); background:rgba(12,18,32,.92); }
-    select.input { appearance:none; cursor:pointer; background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235b6783' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>"); background-repeat:no-repeat; background-position:right 12px center; padding-right:34px; }
-    option { background:#0f172a; color:#e8edf7; }
-    .label { display:block; font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--text-3); margin:0 0 6px 2px; }
-
-    /* ---- badges ---- */
-    .badge { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:8px; font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
-
-    /* ---- toggle ---- */
-    .toggle { width:44px; height:24px; border-radius:12px; border:none; cursor:pointer; transition:all .2s; position:relative; flex-shrink:0; }
-    .toggle span { position:absolute; top:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:left .2s; display:block; }
-
-    /* ---- alerts ---- */
-    .alert { display:flex; align-items:center; gap:12px; padding:13px 16px; border-radius:14px; font-size:13px; font-weight:600; border:1px solid; }
-    .alert-warn { background:rgba(245,158,11,.08); border-color:rgba(245,158,11,.25); color:#fcd34d; }
-    .alert-danger { background:rgba(244,63,94,.08); border-color:rgba(244,63,94,.25); color:#fda4af; }
-
-    /* ---- table ---- */
-    .table-row { transition:background .15s; }
-    .table-row:hover { background:rgba(255,255,255,.025); }
-
-    /* ---- progress ---- */
-    .progress-bar { height:8px; border-radius:5px; background:rgba(255,255,255,.05); overflow:hidden; }
-
-    /* ---- toasts ---- */
-    .toast-wrap { position:fixed; top:18px; right:18px; z-index:200; display:flex; flex-direction:column; gap:10px; max-width:350px; }
-    .toast { display:flex; align-items:flex-start; gap:10px; padding:13px 15px; border-radius:13px; background:rgba(15,22,38,.96); backdrop-filter:blur(12px); border:1px solid var(--border-2); border-left:3px solid var(--tc,#6366f1); box-shadow:0 18px 44px -14px rgba(0,0,0,.7); font-size:13px; font-weight:600; color:var(--text); animation:toastIn .26s cubic-bezier(.4,0,.2,1); }
-    @keyframes toastIn { from { opacity:0; transform:translateX(24px); } to { opacity:1; transform:translateX(0); } }
-
-    /* ---- modal ---- */
-    .modal-backdrop { position:fixed; inset:0; background:rgba(3,6,12,.72); backdrop-filter:blur(5px); z-index:150; display:grid; place-items:center; padding:20px; animation:fadeIn .2s; }
-    .modal { background:var(--surface); border:1px solid var(--border-2); border-radius:20px; padding:26px; max-width:410px; width:100%; box-shadow:0 32px 90px -24px rgba(0,0,0,.85); animation:popIn .24s cubic-bezier(.4,0,.2,1); }
-    @keyframes popIn { from { opacity:0; transform:scale(.93) translateY(12px); } to { opacity:1; transform:none; } }
-    @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
-
-    /* ---- search dropdown ---- */
-    .search-pop { position:absolute; top:calc(100% + 8px); left:0; right:0; background:var(--surface); border:1px solid var(--border-2); border-radius:14px; box-shadow:0 24px 60px -18px rgba(0,0,0,.8); overflow:hidden; z-index:60; }
-    .search-item { display:flex; align-items:center; gap:11px; padding:11px 14px; cursor:pointer; border:none; background:transparent; width:100%; text-align:left; transition:background .12s; }
-    .search-item:hover { background:rgba(255,255,255,.05); }
-
-    /* ---- skeleton ---- */
-    .skel { background:linear-gradient(90deg,rgba(255,255,255,.03) 25%,rgba(255,255,255,.07) 50%,rgba(255,255,255,.03) 75%); background-size:200% 100%; animation:shimmer 1.4s infinite; border-radius:12px; }
-    @keyframes shimmer { from { background-position:200% 0; } to { background-position:-200% 0; } }
-
-    /* ---- scrollbar ---- */
-    .scroll::-webkit-scrollbar { width:6px; height:6px; }
-    .scroll::-webkit-scrollbar-track { background:transparent; }
-    .scroll::-webkit-scrollbar-thumb { background:#1e293b; border-radius:10px; }
-    .scroll::-webkit-scrollbar-thumb:hover { background:#334155; }
-
-    /* ---- animations ---- */
-    @keyframes fadeSlideIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-    .animate-page { animation:fadeSlideIn .35s ease forwards; }
-    @keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:.35; } }
-    .pulse-dot { animation:pulse-dot 2s ease-in-out infinite; }
-
-    /* ---- responsive ---- */
-    @media (max-width:960px) {
-      .app-shell { grid-template-columns:1fr; }
-      .sidebar { position:fixed; left:0; top:0; bottom:0; transform:translateX(-100%); transition:transform .28s cubic-bezier(.4,0,.2,1); z-index:80; }
-      .sidebar.open { transform:translateX(0); }
-      .hamburger { display:grid; }
-      .backdrop { display:block; position:fixed; inset:0; background:rgba(0,0,0,.55); backdrop-filter:blur(2px); z-index:70; }
-      .content { padding:20px 16px 90px; }
-      .topbar { padding:13px 16px; }
-      .grid-2 { grid-template-columns:1fr !important; }
-      .grid-form { grid-template-columns:280px 1fr; }
-    }
-    @media (max-width:760px) {
-      .grid-form { grid-template-columns:1fr !important; }
-      .hide-sm { display:none !important; }
-    }
-  `}</style>
-);
-
-// ============================================================
-//  COMPONENTES VISUAIS
-// ============================================================
-const ScoreRing = ({ score, size = 56 }) => {
-  const radius = 22;
-  const circumference = 2 * Math.PI * radius;
-  const pct = Math.min(Math.max(score / 1000, 0), 1);
-  const strokeDash = pct * circumference;
-  const color = score >= 700 ? '#22c55e' : score >= 500 ? '#f59e0b' : score >= 300 ? '#f97316' : '#ef4444';
-  return (
-    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
-      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="4" />
-        <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke={color} strokeWidth="4"
-          strokeDasharray={`${strokeDash} ${circumference}`} strokeLinecap="round" />
-      </svg>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ fontSize: '11px', fontWeight: 800, color }}>{score}</span>
-      </div>
-    </div>
-  );
-};
-
-const ResultadoBadge = ({ resultado }) => {
-  const cfg = {
-    'Aprovado':         { bg:'rgba(34,197,94,0.12)',  color:'#4ade80', border:'rgba(34,197,94,0.3)',  icon:<ShieldCheck size={12}/> },
-    'Reprovado':        { bg:'rgba(244,63,94,0.12)',  color:'#fb7185', border:'rgba(244,63,94,0.3)',  icon:<ShieldX size={12}/> },
-    'Com Restrições':   { bg:'rgba(251,191,36,0.12)', color:'#fbbf24', border:'rgba(251,191,36,0.3)', icon:<ShieldAlert size={12}/> },
-    'Pendente Análise': { bg:'rgba(148,163,184,0.12)',color:'#94a3b8', border:'rgba(148,163,184,0.3)',icon:<Clock size={12}/> },
-  };
-  const c = cfg[resultado] || cfg['Pendente Análise'];
-  return (
-    <span className="badge" style={{ background:c.bg, color:c.color, border:`1px solid ${c.border}` }}>
-      {c.icon} {resultado}
-    </span>
-  );
-};
-
-const Bars = ({ data, height = 150 }) => {
-  const max = Math.max(...data.map(d => d.value), 1);
-  return (
-    <div style={{ display:'flex', alignItems:'flex-end', gap:16, height, padding:'0 4px' }}>
-      {data.map(d => (
-        <div key={d.label} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:8, height:'100%', justifyContent:'flex-end' }}>
-          <span className="display" style={{ fontSize:15, fontWeight:700, color:d.color }}>{d.value}</span>
-          <div style={{ width:'100%', maxWidth:48, height:`${(d.value/max)*100}%`, minHeight:5, background:`linear-gradient(180deg,${d.color},${d.color}40)`, borderRadius:'9px 9px 4px 4px', transition:'height .6s cubic-bezier(.4,0,.2,1)' }}/>
-          <span style={{ fontSize:10.5, fontWeight:600, color:'var(--text-3)', textAlign:'center' }}>{d.label}</span>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-const Donut = ({ segments, size = 158, thickness = 18, centerLabel, centerSub }) => {
-  const total = segments.reduce((a, s) => a + s.value, 0) || 1;
-  const r = (size - thickness) / 2;
-  const c = 2 * Math.PI * r;
-  return (
-    <div style={{ display:'flex', alignItems:'center', gap:22, flexWrap:'wrap' }}>
-      <div style={{ position:'relative', width:size, height:size, flexShrink:0 }}>
-        <svg width={size} height={size} style={{ transform:'rotate(-90deg)' }}>
-          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,.05)" strokeWidth={thickness}/>
-          {segments.map((s, i) => {
-            const len = (s.value / total) * c;
-            const off = segments.slice(0, i).reduce((a, x) => a + (x.value / total) * c, 0);
-            return <circle key={i} cx={size/2} cy={size/2} r={r} fill="none" stroke={s.color} strokeWidth={thickness} strokeDasharray={`${len} ${c - len}`} strokeDashoffset={-off}/>;
-          })}
-        </svg>
-        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>
-          <span className="display" style={{ fontSize:28, fontWeight:700, color:'#fff', lineHeight:1 }}>{centerLabel}</span>
-          {centerSub && <span style={{ fontSize:9.5, fontWeight:700, letterSpacing:'.09em', textTransform:'uppercase', color:'var(--text-3)', marginTop:3 }}>{centerSub}</span>}
-        </div>
-      </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:9, flex:1, minWidth:130 }}>
-        {segments.map(s => (
-          <div key={s.label} style={{ display:'flex', alignItems:'center', gap:9, fontSize:12.5 }}>
-            <span style={{ width:10, height:10, borderRadius:3, background:s.color, flexShrink:0 }}/>
-            <span style={{ color:'var(--text-2)', fontWeight:600, flex:1 }}>{s.label}</span>
-            <span style={{ color:'#fff', fontWeight:800 }}>{s.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const Funnel = ({ steps }) => {
-  const max = Math.max(...steps.map(s => s.value), 1);
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      {steps.map((s, i) => {
-        const pct = (s.value / max) * 100;
-        const conv = i > 0 && steps[i-1].value ? Math.round((s.value / steps[i-1].value) * 100) : null;
-        return (
-          <div key={s.label}>
-            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-              <span style={{ fontSize:12.5, fontWeight:600, color:'var(--text-2)' }}>{s.label}</span>
-              <span className="display" style={{ fontSize:14, fontWeight:700, color:s.color }}>
-                {s.value}{conv !== null && <span style={{ fontSize:10.5, color:'var(--text-3)', fontWeight:600, marginLeft:7 }}>{conv}%</span>}
-              </span>
-            </div>
-            <div style={{ height:11, borderRadius:6, background:'rgba(255,255,255,.04)', overflow:'hidden' }}>
-              <div style={{ height:'100%', width:`${pct}%`, background:`linear-gradient(90deg,${s.color},${s.color}80)`, borderRadius:6, transition:'width .7s cubic-bezier(.4,0,.2,1)' }}/>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-const SkeletonList = ({ rows = 4, h = 74 }) => (
-  <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-    {Array.from({ length: rows }).map((_, i) => <div key={i} className="skel" style={{ height:h }}/>)}
-  </div>
-);
-
-const EmptyState = ({ Icon, label }) => (
-  <div style={{ textAlign:'center', padding:'52px 0', color:'#334155', fontSize:12, fontWeight:700, textTransform:'uppercase', letterSpacing:'.1em', border:'1px dashed rgba(255,255,255,.06)', borderRadius:16 }}>
-    <Icon size={30} color="#1e293b" style={{ margin:'0 auto 14px', display:'block' }}/>
-    {label}
-  </div>
-);
-
-const PageHeader = ({ Icon, color, title, sub, children }) => (
-  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-end', gap:16, flexWrap:'wrap', marginBottom:26 }}>
-    <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-      <div style={{ background:`${color}1a`, border:`1px solid ${color}33`, borderRadius:14, padding:11, color, display:'flex' }}>
-        <Icon size={24}/>
-      </div>
-      <div>
-        <h1 className="display" style={{ fontSize:26, fontWeight:700, color:'#fff', margin:0, letterSpacing:'-.5px' }}>{title}</h1>
-        <p style={{ fontSize:13, color:'var(--text-3)', margin:'2px 0 0' }}>{sub}</p>
-      </div>
-    </div>
-    <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>{children}</div>
-  </div>
-);
+import { db, loadPDF } from './lib/firebase';
+import { CORES, ONT_MODELOS, formatarDocumento, fmtBRL, fmtData } from './lib/format';
+import { GlobalStyle, ScoreRing, ResultadoBadge, Bars, Donut, Funnel, SkeletonList, EmptyState, PageHeader } from './components/ui';
 
 // ============================================================
 //  APP
@@ -731,7 +370,7 @@ export default function App() {
     notify('success', 'CSV exportado.');
   };
 
-  const novoPDF = (titulo) => {
+  const novoPDF = (jsPDF, titulo) => {
     const d = new jsPDF();
     d.setFontSize(16); d.setTextColor(99, 102, 241);
     d.text(`LUMIX FIBRA`, 14, 17);
@@ -742,12 +381,13 @@ export default function App() {
     return d;
   };
 
-  const exportarClientes = (tipo) => {
+  const exportarClientes = async (tipo) => {
     if (tipo === 'csv') {
       baixarCSV('Lumix_Clientes', 'Nome,Serial,Login,CTO,Porta,Status,SGP',
         clientes.map(c => [c.nome, c.serial, c.login, c.cto, c.porta, c.status, c.lancadoSGP ? 'Sim' : 'Não']));
     } else {
-      const d = novoPDF('Relatório de Clientes');
+      const { jsPDF, autoTable } = await loadPDF();
+      const d = novoPDF(jsPDF, 'Relatório de Clientes');
       autoTable(d, { startY: 35, head: [['Assinante','Serial (ONT)','Login','CTO/Porta','Status','SGP']],
         body: clientes.map(c => [c.nome, c.serial, c.login, `${c.cto||'—'}/P${c.porta||'—'}`, c.status, c.lancadoSGP ? 'Sim' : 'Não']),
         theme: 'grid', headStyles: { fillColor: [59,130,246], fontSize: 8 }, bodyStyles: { fontSize: 8 } });
@@ -755,12 +395,13 @@ export default function App() {
     }
   };
 
-  const exportarOrdens = (tipo) => {
+  const exportarOrdens = async (tipo) => {
     if (tipo === 'csv') {
       baixarCSV('Lumix_OS', 'Cliente,Tipo,Serial,CTO,Porta,Data,Valor,Status',
         ordens.map(o => [o.nome, o.tipo, o.serial, o.cto, o.porta, fmtData(o.dataAgendada), o.valor || 0, o.status]));
     } else {
-      const d = novoPDF('Ordens de Serviço');
+      const { jsPDF, autoTable } = await loadPDF();
+      const d = novoPDF(jsPDF, 'Ordens de Serviço');
       autoTable(d, { startY: 35, head: [['Cliente','Tipo','CTO/Porta','Data','Valor','Status']],
         body: ordens.map(o => [o.nome, o.tipo, `${o.cto||'—'}/P${o.porta||'—'}`, fmtData(o.dataAgendada), fmtBRL(o.valor), o.status]),
         theme: 'grid', headStyles: { fillColor: [245,158,11], fontSize: 8 }, bodyStyles: { fontSize: 8 } });
@@ -768,12 +409,13 @@ export default function App() {
     }
   };
 
-  const exportarBobinas = (tipo) => {
+  const exportarBobinas = async (tipo) => {
     if (tipo === 'csv') {
       baixarCSV('Lumix_Bobinas', 'Identificacao,Tipo,Total,Usado,Restante,Marca',
         bobinas.map(b => [b.identificacao, b.tipo, b.total, b.usado, b.total - b.usado, b.marca]));
     } else {
-      const d = novoPDF('Estoque de Bobinas');
+      const { jsPDF, autoTable } = await loadPDF();
+      const d = novoPDF(jsPDF, 'Estoque de Bobinas');
       autoTable(d, { startY: 35, head: [['Identificação','Tipo','Total','Usado','Restante','Marca']],
         body: bobinas.map(b => [b.identificacao, b.tipo, `${b.total}m`, `${b.usado}m`, `${b.total - b.usado}m`, b.marca || '—']),
         theme: 'grid', headStyles: { fillColor: [16,185,129], fontSize: 8 }, bodyStyles: { fontSize: 8 } });
@@ -781,12 +423,13 @@ export default function App() {
     }
   };
 
-  const exportarConsultas = (tipo) => {
+  const exportarConsultas = async (tipo) => {
     if (tipo === 'csv') {
       baixarCSV('Lumix_Serasa', 'Nome,Tipo,Documento,Score,Resultado,Convertido,Data',
         consultasFiltradas.map(c => [c.nome, c.tipoDoc, c.documento, c.score ?? '', c.resultado, c.convertido ? 'Sim' : 'Não', fmtData(c.dataConsulta)]));
     } else {
-      const d = novoPDF('Relatório de Consultas Serasa');
+      const { jsPDF, autoTable } = await loadPDF();
+      const d = novoPDF(jsPDF, 'Relatório de Consultas Serasa');
       autoTable(d, { startY: 35, head: [['Nome','Tipo','Documento','Score','Resultado','Conv.','Data']],
         body: consultasFiltradas.map(c => [c.nome, c.tipoDoc, c.documento, c.score ?? '—', c.resultado, c.convertido ? 'Sim' : 'Não', fmtData(c.dataConsulta)]),
         theme: 'grid', headStyles: { fillColor: [168,85,247], fontSize: 8 }, bodyStyles: { fontSize: 8 } });
@@ -869,6 +512,9 @@ export default function App() {
   const ontDefeito = onts.filter(o => o.status === 'Defeito').length;
   const ontBaixo = ontEmEstoque <= 3;
   const countOnt = { 'Todos': onts.length, 'Em Estoque': ontEmEstoque, 'Em Uso': ontEmUso, 'Defeito': ontDefeito };
+  const ontPorMarca = Object.entries(
+    onts.reduce((a, o) => { const k = (o.marca || '').trim() || 'Sem marca'; a[k] = (a[k] || 0) + 1; return a; }, {})
+  ).map(([label, value]) => ({ label, value, color: CORES.estoque })).sort((a, b) => b.value - a.value).slice(0, 6);
   const ativos = clientes.filter(c => c.status === 'Ativo');
   const pendentesSGP = ativos.filter(c => !prontoSGP(c) || !c.lancadoSGP).length;
 
@@ -1136,6 +782,14 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {/* ONT por marca */}
+                {onts.length > 0 && (
+                  <div className="card" style={{ marginBottom:18 }}>
+                    <div className="panel-head"><HardDrive size={16} color={CORES.estoque}/><span className="panel-title">ONT por marca</span><span style={{ marginLeft:'auto', fontSize:11, color:'var(--text-3)' }}>{onts.length} no total</span></div>
+                    <div style={{ padding:'26px 24px' }}><Bars data={ontPorMarca}/></div>
+                  </div>
+                )}
 
                 {/* Funil + atalhos */}
                 <div className="grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:18 }}>
