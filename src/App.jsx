@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import {
   Save, Search, Trash2, Edit, Info, CheckCircle, XCircle, Users,
   Download, Printer, Wifi, LayoutDashboard, ClipboardList,
@@ -8,7 +8,8 @@ import {
   Database, Layers, Plus, ShieldCheck, ShieldX, ShieldAlert,
   FileSearch, Calendar, AlertCircle, TrendingUp, Hash,
   BadgeCheck, ChevronRight, Star, Menu, X, AlertTriangle,
-  Activity, Boxes, ArrowRight, Phone, PackageX, RefreshCw
+  Activity, Boxes, ArrowRight, Phone, PackageX, RefreshCw,
+  HardDrive, PackagePlus, PackageCheck, Undo2, Link2, ClipboardCheck, CircleDashed
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -33,7 +34,10 @@ const CORES = {
   suporte:  '#f59e0b',
   bobinas:  '#10b981',
   serasa:   '#a855f7',
+  estoque:  '#22d3ee',
 };
+
+const ONT_MODELOS = ['ZTE F660', 'ZTE F670L', 'Huawei EG8145V5', 'Huawei HG8546M', 'Nokia G-1425G-A', 'Intelbras 110G', 'Fiberhome AN5506'];
 
 // --- HELPERS DE FORMATAÇÃO ---
 const formatarCPF = (valor) => {
@@ -398,9 +402,18 @@ export default function App() {
   const [clientes, setClientes] = useState([]);
   const [buscaCliente, setBuscaCliente] = useState('');
   const [filtroStatusCliente, setFiltroStatusCliente] = useState('Todos');
+  const [filtroSGP, setFiltroSGP] = useState('Todos');
   const [editandoClienteId, setEditandoClienteId] = useState(null);
-  const clienteVazio = { nome:'', login:'', serial:'', cto:'', porta:'', observacao:'', status:'Ativo' };
+  const clienteVazio = { nome:'', login:'', serial:'', ontId:'', cto:'', porta:'', observacao:'', status:'Ativo', lancadoSGP:false };
   const [cliente, setCliente] = useState(clienteVazio);
+
+  // ---- Estados: Estoque ONT ----
+  const [onts, setOnts] = useState([]);
+  const [buscaOnt, setBuscaOnt] = useState('');
+  const [filtroStatusOnt, setFiltroStatusOnt] = useState('Todos');
+  const [modoLote, setModoLote] = useState(false);
+  const ontVazia = { serial:'', modelo:'', marca:'' };
+  const [ont, setOnt] = useState(ontVazia);
 
   // ---- Estados: Suporte (OS) ----
   const [ordens, setOrdens] = useState([]);
@@ -430,8 +443,8 @@ export default function App() {
 
   // ---- Firebase ----
   useEffect(() => {
-    const flags = { c:false, o:false, b:false, s:false };
-    const done = (k) => { flags[k] = true; if (flags.c && flags.o && flags.b && flags.s) setLoading(false); };
+    const flags = { c:false, o:false, b:false, s:false, n:false };
+    const done = (k) => { flags[k] = true; if (flags.c && flags.o && flags.b && flags.s && flags.n) setLoading(false); };
     const qClientes = query(collection(db, "clientes"), orderBy("nome", "asc"));
     const unsubClientes = onSnapshot(qClientes, (s) => { setClientes(s.docs.map(d => ({ id:d.id, ...d.data() }))); done('c'); });
     const qOrdens = query(collection(db, "suporte"), orderBy("dataAgendada", "asc"));
@@ -440,29 +453,52 @@ export default function App() {
     const unsubBobinas = onSnapshot(qBobinas, (s) => { setBobinas(s.docs.map(d => ({ id:d.id, ...d.data() }))); done('b'); });
     const qConsultas = query(collection(db, "consultas"), orderBy("dataConsulta", "desc"));
     const unsubConsultas = onSnapshot(qConsultas, (s) => { setConsultas(s.docs.map(d => ({ id:d.id, ...d.data() }))); done('s'); });
-    return () => { unsubClientes(); unsubOrdens(); unsubBobinas(); unsubConsultas(); };
+    const qOnts = query(collection(db, "onts"), orderBy("serial", "asc"));
+    const unsubOnts = onSnapshot(qOnts, (s) => { setOnts(s.docs.map(d => ({ id:d.id, ...d.data() }))); done('n'); }, () => done('n'));
+    return () => { unsubClientes(); unsubOrdens(); unsubBobinas(); unsubConsultas(); unsubOnts(); };
   }, []);
 
   // ============================================================
   //  CLIENTES
   // ============================================================
+  // helpers ONT <-> cliente (almoxarifado)
+  const liberarOnt = async (ontId) => {
+    if (!ontId) return;
+    const o = onts.find(x => x.id === ontId);
+    if (o && o.status === 'Em Uso')
+      await updateDoc(doc(db, "onts", ontId), { status: 'Em Estoque', clienteId: null, clienteNome: null, dataVinculo: null });
+  };
+  const ocuparOnt = async (ontId, clienteId, clienteNome) => {
+    if (!ontId) return;
+    await updateDoc(doc(db, "onts", ontId), { status: 'Em Uso', clienteId, clienteNome, dataVinculo: new Date().toISOString() });
+  };
+
   const salvarCliente = async () => {
-    if (!cliente.nome || !cliente.serial) return notify('error', 'Nome e Serial são obrigatórios.');
+    if (!cliente.nome) return notify('error', 'Nome do assinante é obrigatório.');
     if (!editandoClienteId) {
-      if (clientes.find(c => c.serial?.toLowerCase() === cliente.serial.toLowerCase() && c.status === 'Ativo'))
-        return notify('warning', `Serial ${cliente.serial} já está em uso.`);
       if (clientes.find(c => c.nome?.toLowerCase() === cliente.nome.toLowerCase() && c.status === 'Ativo'))
         return notify('warning', `Cliente ${cliente.nome} já cadastrado.`);
       if (cliente.cto && cliente.porta && clientes.find(c => c.status === 'Ativo' && (c.cto||'').toLowerCase() === cliente.cto.toLowerCase() && String(c.porta) === String(cliente.porta)))
         return notify('warning', `Porta ${cliente.porta} da CTO ${cliente.cto} já está ocupada.`);
     }
+    const ontSel = cliente.ontId || '';
+    const serialSel = ontSel ? (onts.find(o => o.id === ontSel)?.serial || '') : '';
+    const payload = { ...cliente, ontId: ontSel, serial: serialSel || cliente.serial || '' };
     try {
       if (editandoClienteId) {
-        await updateDoc(doc(db, "clientes", editandoClienteId), { ...cliente });
+        const prev = clientes.find(c => c.id === editandoClienteId);
+        await updateDoc(doc(db, "clientes", editandoClienteId), payload);
+        if ((prev?.ontId || '') !== ontSel) {
+          await liberarOnt(prev?.ontId);
+          if (ontSel) await ocuparOnt(ontSel, editandoClienteId, cliente.nome);
+        } else if (ontSel) {
+          await updateDoc(doc(db, "onts", ontSel), { clienteNome: cliente.nome });
+        }
         setEditandoClienteId(null);
         notify('success', 'Cliente atualizado.');
       } else {
-        await addDoc(collection(db, "clientes"), { ...cliente, dataCadastro: new Date().toISOString() });
+        const ref = await addDoc(collection(db, "clientes"), { ...payload, dataCadastro: new Date().toISOString() });
+        if (ontSel) await ocuparOnt(ontSel, ref.id, cliente.nome);
         notify('success', 'Cliente cadastrado.');
       }
       setCliente(clienteVazio);
@@ -470,12 +506,37 @@ export default function App() {
   };
 
   const alternarStatusCliente = async (id, status) => {
-    await updateDoc(doc(db, "clientes", id), { status: status === 'Ativo' ? 'Desativado' : 'Ativo' });
+    const c = clientes.find(x => x.id === id);
+    const novo = status === 'Ativo' ? 'Desativado' : 'Ativo';
+    await updateDoc(doc(db, "clientes", id), { status: novo });
+    if (novo === 'Desativado') {
+      await liberarOnt(c?.ontId);
+    } else if (c?.ontId) {
+      const o = onts.find(x => x.id === c.ontId);
+      if (o && o.status === 'Em Estoque') await ocuparOnt(c.ontId, id, c.nome);
+      else if (o && o.status === 'Em Uso' && o.clienteId !== id) notify('warning', `ONT ${o.serial} já está com outro cliente.`);
+    }
+  };
+
+  const devolverOntCliente = async (c) => {
+    if (!c.ontId) return notify('info', 'Cliente sem ONT vinculada.');
+    if (!(await confirmar(`Devolver a ONT ${c.serial || ''} ao estoque?`, { confirmLabel: 'Devolver' }))) return;
+    await liberarOnt(c.ontId);
+    await updateDoc(doc(db, "clientes", c.id), { ontId: '', serial: '' });
+    notify('success', 'ONT devolvida ao estoque.');
+  };
+
+  const toggleSGP = async (id, atual) => {
+    await updateDoc(doc(db, "clientes", id), { lancadoSGP: !atual });
   };
 
   const excluirCliente = async (id) => {
-    if (await confirmar('Apagar este cliente?', { danger: true, confirmLabel: 'Apagar' }))
-      { await deleteDoc(doc(db, "clientes", id)); notify('success', 'Cliente removido.'); }
+    if (await confirmar('Apagar este cliente?', { danger: true, confirmLabel: 'Apagar' })) {
+      const c = clientes.find(x => x.id === id);
+      await liberarOnt(c?.ontId);
+      await deleteDoc(doc(db, "clientes", id));
+      notify('success', 'Cliente removido.');
+    }
   };
 
   // ============================================================
@@ -576,6 +637,88 @@ export default function App() {
   };
 
   // ============================================================
+  //  ESTOQUE ONT (almoxarifado)
+  // ============================================================
+  const salvarOnt = async () => {
+    if (!ont.serial.trim()) return notify('error', 'Serial da ONT é obrigatório.');
+    if (onts.find(o => (o.serial||'').toLowerCase() === ont.serial.trim().toLowerCase()))
+      return notify('warning', `Serial ${ont.serial} já existe no estoque.`);
+    try {
+      await addDoc(collection(db, "onts"), {
+        serial: ont.serial.trim(), modelo: ont.modelo.trim(), marca: ont.marca.trim(),
+        status: 'Em Estoque', clienteId: null, clienteNome: null,
+        dataEntrada: new Date().toISOString(), dataVinculo: null,
+      });
+      setOnt(ontVazia);
+      notify('success', 'ONT adicionada ao estoque.');
+    } catch { notify('error', 'Erro ao salvar ONT.'); }
+  };
+
+  // adicionar várias ONTs de uma vez (1 serial por linha)
+  const parseSeriais = (txt) => [...new Set((txt || '').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean))];
+  const salvarOntLote = async () => {
+    const lista = parseSeriais(ont.serial);
+    if (!lista.length) return notify('error', 'Cole ao menos 1 serial (um por linha).');
+    const existentes = new Set(onts.map(o => (o.serial || '').toLowerCase()));
+    const vistos = new Set();
+    const novos = lista.filter(s => { const k = s.toLowerCase(); if (existentes.has(k) || vistos.has(k)) return false; vistos.add(k); return true; });
+    const ignoradas = lista.length - novos.length;
+    if (!novos.length) return notify('warning', 'Todos os seriais já existem no estoque.');
+    if (!(await confirmar(`Adicionar ${novos.length} ONT(s) ao estoque${ignoradas ? ` (${ignoradas} duplicada(s) ignorada(s))` : ''}?`, { confirmLabel: 'Adicionar' }))) return;
+    try {
+      const agora = new Date().toISOString();
+      const batch = writeBatch(db);
+      novos.forEach(serial => {
+        const ref = doc(collection(db, "onts"));
+        batch.set(ref, { serial, modelo: ont.modelo.trim(), marca: ont.marca.trim(), status: 'Em Estoque', clienteId: null, clienteNome: null, dataEntrada: agora, dataVinculo: null });
+      });
+      await batch.commit();
+      setOnt(ontVazia);
+      notify('success', `${novos.length} ONT(s) adicionadas${ignoradas ? `, ${ignoradas} ignorada(s)` : ''}.`);
+    } catch { notify('error', 'Erro ao salvar lote.'); }
+  };
+
+  const alternarDefeitoOnt = async (o) => {
+    if (o.status === 'Em Uso') return notify('warning', 'ONT em uso — devolva antes de marcar defeito.');
+    await updateDoc(doc(db, "onts", o.id), { status: o.status === 'Defeito' ? 'Em Estoque' : 'Defeito' });
+  };
+
+  // devolver ONT em uso direto do estoque (limpa também o cliente vinculado)
+  const desvincularOnt = async (o) => {
+    if (!(await confirmar(`Desvincular ONT ${o.serial} de ${o.clienteNome || 'cliente'} e devolver ao estoque?`, { confirmLabel: 'Desvincular' }))) return;
+    if (o.clienteId) await updateDoc(doc(db, "clientes", o.clienteId), { ontId: '', serial: '' }).catch(() => {});
+    await updateDoc(doc(db, "onts", o.id), { status: 'Em Estoque', clienteId: null, clienteNome: null, dataVinculo: null });
+    notify('success', 'ONT devolvida ao estoque.');
+  };
+
+  const excluirOnt = async (o) => {
+    if (o.status === 'Em Uso') return notify('warning', 'ONT em uso — devolva ao estoque antes de excluir.');
+    if (await confirmar(`Excluir a ONT ${o.serial} do estoque?`, { danger: true, confirmLabel: 'Excluir' })) {
+      await deleteDoc(doc(db, "onts", o.id));
+      notify('success', 'ONT excluída.');
+    }
+  };
+
+  // Q4 — importar seriais dos clientes ativos como "Em Uso"
+  const importarOntsLegado = async () => {
+    const jaExiste = new Set(onts.map(o => (o.serial || '').toLowerCase()));
+    const novos = clientes.filter(c => c.status === 'Ativo' && c.serial && !c.ontId && !jaExiste.has(c.serial.toLowerCase()));
+    if (!novos.length) return notify('info', 'Nada a importar — seriais já no estoque ou clientes sem serial.');
+    if (!(await confirmar(`Importar ${novos.length} serial(is) de clientes ativos para o estoque como "Em Uso"?`, { confirmLabel: 'Importar' }))) return;
+    try {
+      for (const c of novos) {
+        const ref = await addDoc(collection(db, "onts"), {
+          serial: c.serial, modelo: '', marca: '', status: 'Em Uso',
+          clienteId: c.id, clienteNome: c.nome,
+          dataEntrada: new Date().toISOString(), dataVinculo: new Date().toISOString(),
+        });
+        await updateDoc(doc(db, "clientes", c.id), { ontId: ref.id });
+      }
+      notify('success', `${novos.length} ONT(s) importadas para o estoque.`);
+    } catch { notify('error', 'Erro na importação.'); }
+  };
+
+  // ============================================================
   //  EXPORTAÇÃO (C6) — PDF corrigido p/ jspdf-autotable v5
   // ============================================================
   const baixarCSV = (nome, cabecalho, linhas) => {
@@ -601,12 +744,12 @@ export default function App() {
 
   const exportarClientes = (tipo) => {
     if (tipo === 'csv') {
-      baixarCSV('Lumix_Clientes', 'Nome,Serial,Login,CTO,Porta,Status',
-        clientes.map(c => [c.nome, c.serial, c.login, c.cto, c.porta, c.status]));
+      baixarCSV('Lumix_Clientes', 'Nome,Serial,Login,CTO,Porta,Status,SGP',
+        clientes.map(c => [c.nome, c.serial, c.login, c.cto, c.porta, c.status, c.lancadoSGP ? 'Sim' : 'Não']));
     } else {
       const d = novoPDF('Relatório de Clientes');
-      autoTable(d, { startY: 35, head: [['Assinante','Serial','Login','CTO/Porta','Status']],
-        body: clientes.map(c => [c.nome, c.serial, c.login, `${c.cto||'—'}/P${c.porta||'—'}`, c.status]),
+      autoTable(d, { startY: 35, head: [['Assinante','Serial (ONT)','Login','CTO/Porta','Status','SGP']],
+        body: clientes.map(c => [c.nome, c.serial, c.login, `${c.cto||'—'}/P${c.porta||'—'}`, c.status, c.lancadoSGP ? 'Sim' : 'Não']),
         theme: 'grid', headStyles: { fillColor: [59,130,246], fontSize: 8 }, bodyStyles: { fontSize: 8 } });
       d.save('Clientes_Lumix.pdf'); notify('success', 'PDF exportado.');
     }
@@ -667,11 +810,26 @@ export default function App() {
   // ============================================================
   const hoje0 = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
 
+  // checklist de prontidão (comodato + rede + SGP)
+  const temComodato = (c) => !!(c.ontId || c.serial);
+  const temRede = (c) => !!(c.cto && c.porta);
+  const prontoSGP = (c) => temComodato(c) && temRede(c);
+
   const clientesFiltrados = clientes.filter(c => {
     const s = buscaCliente.toLowerCase();
+    const okSGP = filtroSGP === 'Todos'
+      || (filtroSGP === 'Pronto' && prontoSGP(c))
+      || (filtroSGP === 'Pendente' && c.status === 'Ativo' && (!prontoSGP(c) || !c.lancadoSGP));
     return (c.nome?.toLowerCase().includes(s) || c.serial?.toLowerCase().includes(s) || c.login?.toLowerCase().includes(s)) &&
-           (filtroStatusCliente === 'Todos' || c.status === filtroStatusCliente);
+           (filtroStatusCliente === 'Todos' || c.status === filtroStatusCliente) && okSGP;
   }).sort((a,b) => (a.nome||'').localeCompare(b.nome||'','pt-BR',{sensitivity:'base'}));
+
+  const ontsFiltradas = onts.filter(o =>
+    (o.serial||'').toLowerCase().includes(buscaOnt.toLowerCase()) &&
+    (filtroStatusOnt === 'Todos' || o.status === filtroStatusOnt)
+  );
+  // ONTs ofertáveis no form do cliente: livres + a já vinculada (em edição)
+  const ontsDisponiveis = onts.filter(o => o.status === 'Em Estoque' || o.id === cliente.ontId);
 
   const ordensFiltradas = ordens.filter(o => {
     const s = buscaOrdem.toLowerCase();
@@ -705,6 +863,15 @@ export default function App() {
   const ehAtrasada = (o) => o.status === 'Pendente' && o.dataAgendada && new Date(o.dataAgendada) < hoje0;
   const osAtrasadas = ordens.filter(ehAtrasada);
 
+  // Estoque ONT + prontidão SGP
+  const ontEmEstoque = onts.filter(o => o.status === 'Em Estoque').length;
+  const ontEmUso = onts.filter(o => o.status === 'Em Uso').length;
+  const ontDefeito = onts.filter(o => o.status === 'Defeito').length;
+  const ontBaixo = ontEmEstoque <= 3;
+  const countOnt = { 'Todos': onts.length, 'Em Estoque': ontEmEstoque, 'Em Uso': ontEmUso, 'Defeito': ontDefeito };
+  const ativos = clientes.filter(c => c.status === 'Ativo');
+  const pendentesSGP = ativos.filter(c => !prontoSGP(c) || !c.lancadoSGP).length;
+
   // KPIs (C4)
   const clientesAtivos = clientes.filter(c => c.status === 'Ativo').length;
   const osPendentes = ordens.filter(o => o.status === 'Pendente').length;
@@ -737,6 +904,8 @@ export default function App() {
       .slice(0,4).map(o => ({ tipo:'OS', nome:o.nome, sub:o.tipo, tela:'suporte', busca:o.nome, color:CORES.suporte, Icon:Wrench })),
     ...consultas.filter(c => (c.nome||'').toLowerCase().includes(gs) || (c.documento||'').toLowerCase().includes(gs))
       .slice(0,4).map(c => ({ tipo:'Serasa', nome:c.nome, sub:c.documento, tela:'serasa', busca:c.nome, color:CORES.serasa, Icon:FileSearch })),
+    ...onts.filter(o => (o.serial||'').toLowerCase().includes(gs))
+      .slice(0,4).map(o => ({ tipo:'ONT', nome:o.serial, sub:`${o.status}${o.clienteNome ? ' · '+o.clienteNome : ''}`, tela:'estoque', busca:o.serial, color:CORES.estoque, Icon:HardDrive })),
   ] : [];
 
   const irPara = (tela, busca) => {
@@ -744,6 +913,7 @@ export default function App() {
     if (tela === 'clientes' && busca !== undefined) setBuscaCliente(busca);
     if (tela === 'suporte' && busca !== undefined) setBuscaOrdem(busca);
     if (tela === 'serasa' && busca !== undefined) setBuscaConsulta(busca);
+    if (tela === 'estoque' && busca !== undefined) setBuscaOnt(busca);
   };
 
   // ---- helpers de estilo ----
@@ -757,6 +927,7 @@ export default function App() {
     { id:'dashboard', label:'Dashboard', Icon:LayoutDashboard, color:CORES.dashboard },
     { id:'clientes',  label:'Clientes',  Icon:Users,      color:CORES.clientes, count:clientesAtivos },
     { id:'suporte',   label:'Suporte / OS', Icon:Wrench,  color:CORES.suporte,  count:osPendentes },
+    { id:'estoque',   label:'Estoque ONT', Icon:HardDrive, color:CORES.estoque, count:ontEmEstoque },
     { id:'bobinas',   label:'Bobinas',   Icon:Database,   color:CORES.bobinas,  count:bobinas.length },
     { id:'serasa',    label:'Serasa',    Icon:FileSearch, color:CORES.serasa,   count:consultas.length },
   ];
@@ -874,7 +1045,7 @@ export default function App() {
                 <PageHeader Icon={LayoutDashboard} color={CORES.dashboard} title="Dashboard" sub="Visão geral da operação Lumix Fibra" />
 
                 {/* Alertas automáticos */}
-                {(osAtrasadas.length > 0 || bobinasBaixas.length > 0 || totalConflitos > 0) && (
+                {(osAtrasadas.length > 0 || bobinasBaixas.length > 0 || totalConflitos > 0 || (ontBaixo && onts.length > 0) || pendentesSGP > 0) && (
                   <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:24 }}>
                     {osAtrasadas.length > 0 && (
                       <div className="alert alert-danger">
@@ -897,6 +1068,20 @@ export default function App() {
                         <button className="btn btn-sm" style={{ background:'rgba(244,63,94,.15)', color:'#fda4af' }} onClick={() => irPara('clientes')}>Revisar</button>
                       </div>
                     )}
+                    {ontBaixo && onts.length > 0 && (
+                      <div className="alert alert-warn">
+                        <HardDrive size={18}/>
+                        <span style={{ flex:1 }}>Estoque de ONT baixo — <b>{ontEmEstoque}</b> em estoque.</span>
+                        <button className="btn btn-sm" style={{ background:'rgba(245,158,11,.15)', color:'#fcd34d' }} onClick={() => irPara('estoque')}>Ver estoque</button>
+                      </div>
+                    )}
+                    {pendentesSGP > 0 && (
+                      <div className="alert alert-warn">
+                        <ClipboardCheck size={18}/>
+                        <span style={{ flex:1 }}><b>{pendentesSGP}</b> cliente(s) ativo(s) pendente(s) de lançamento no SGP.</span>
+                        <button className="btn btn-sm" style={{ background:'rgba(14,165,233,.15)', color:'#7dd3fc' }} onClick={() => { setFiltroSGP('Pendente'); irPara('clientes'); }}>Revisar</button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -907,6 +1092,8 @@ export default function App() {
                     { label:'OS Pendentes', val: osPendentes, sub:`${osAtrasadas.length} atrasadas`, color:CORES.suporte, Icon:Clock },
                     { label:'Faturamento (Pago)', val: fmtBRL(faturamento), sub:`ticket ${fmtBRL(ticketMedio)}`, color:CORES.bobinas, Icon:DollarSign },
                     { label:'Conversão Serasa', val:`${taxaConversao}%`, sub:`${statsSerasa.convertidos} de ${statsSerasa.total}`, color:CORES.serasa, Icon:TrendingUp },
+                    { label:'Estoque ONT', val: ontEmEstoque, sub:`${ontEmUso} em uso · ${onts.length} total`, color:CORES.estoque, Icon:HardDrive },
+                    { label:'Pendentes SGP', val: pendentesSGP, sub:`de ${ativos.length} ativos`, color:'#0ea5e9', Icon:ClipboardCheck },
                   ].map(k => (
                     <div key={k.label} className="kpi">
                       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:14 }}>
@@ -999,7 +1186,14 @@ export default function App() {
                   </div>
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))', gap:14 }}>
                     <div><p className="label">Assinante</p><input className="input" placeholder="Nome completo..." value={cliente.nome} onChange={e => setCliente({...cliente, nome:e.target.value})}/></div>
-                    <div><p className="label">Serial (SN ONU)</p><input className="input" style={{ fontFamily:'monospace' }} placeholder="ZTEG..." value={cliente.serial} onChange={e => setCliente({...cliente, serial:e.target.value})}/></div>
+                    <div>
+                      <p className="label">ONT / Comodato (estoque)</p>
+                      <select className="input" style={{ fontFamily:'monospace' }} value={cliente.ontId || ''}
+                        onChange={e => { const id = e.target.value; const o = onts.find(x => x.id === id); setCliente({ ...cliente, ontId:id, serial: o ? o.serial : '' }); }}>
+                        <option value="">— Sem ONT —</option>
+                        {ontsDisponiveis.map(o => <option key={o.id} value={o.id}>{o.serial}{o.modelo ? ` · ${o.modelo}` : ''}</option>)}
+                      </select>
+                    </div>
                     <div><p className="label">Login PPPoE</p><input className="input" placeholder="user@lumix..." value={cliente.login} onChange={e => setCliente({...cliente, login:e.target.value})}/></div>
                     <div>
                       <p className="label">CTO / Porta</p>
@@ -1032,6 +1226,11 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                    <div style={{ display:'flex', gap:4, padding:4, background:'rgba(6,10,18,.6)', borderRadius:12, border:'1px solid var(--border)' }}>
+                      {[['Todos','Todos'],['Pronto','Pronto p/ SGP'],['Pendente','Pendente SGP']].map(([v,lbl]) => (
+                        <button key={v} onClick={() => setFiltroSGP(v)} style={btnTab(filtroSGP===v, '#0ea5e9')}>{lbl}</button>
+                      ))}
+                    </div>
                   </div>
 
                   <div style={{ overflowX:'auto' }}>
@@ -1052,7 +1251,12 @@ export default function App() {
                                 <span style={{ fontWeight:700, fontSize:14, color: c.status==='Desativado'?'var(--text-3)':'#fff', textDecoration: c.status==='Desativado'?'line-through':'none' }}>{c.nome}</span>
                                 {conflitoIds.has(c.id) && <span className="badge" style={{ background:'rgba(244,63,94,.13)', color:'#fb7185', border:'1px solid rgba(244,63,94,.3)' }}><ShieldAlert size={11}/> Conflito</span>}
                               </div>
-                              <div style={{ fontSize:10, fontFamily:'monospace', color:'var(--text-3)', letterSpacing:'.04em', textTransform:'uppercase' }}>{c.serial || '—'} | {c.login || '—'}</div>
+                              <div style={{ fontSize:10, fontFamily:'monospace', color:'var(--text-3)', letterSpacing:'.04em', textTransform:'uppercase' }}>{c.serial || 'sem ONT'} | {c.login || '—'}</div>
+                              <div style={{ display:'flex', gap:5, marginTop:6, flexWrap:'wrap' }}>
+                                {(() => { const ok = temComodato(c); return <span className="badge" title="Comodato (ONT) vinculado" style={{ background: ok?'rgba(34,211,238,.12)':'rgba(255,255,255,.04)', color: ok?'#67e8f9':'var(--text-3)', border:`1px solid ${ok?'rgba(34,211,238,.25)':'var(--border)'}` }}>{ok?<HardDrive size={10}/>:<CircleDashed size={10}/>} Comodato</span>; })()}
+                                {(() => { const ok = temRede(c); return <span className="badge" title="CTO e porta preenchidos" style={{ background: ok?'rgba(59,130,246,.12)':'rgba(255,255,255,.04)', color: ok?'#60a5fa':'var(--text-3)', border:`1px solid ${ok?'rgba(59,130,246,.25)':'var(--border)'}` }}>{ok?<CheckCircle size={10}/>:<CircleDashed size={10}/>} CTO/Porta</span>; })()}
+                                <button onClick={() => toggleSGP(c.id, c.lancadoSGP)} className="badge" title="Marcar como lançado no SGP" style={{ cursor:'pointer', background: c.lancadoSGP?'rgba(34,197,94,.13)':'rgba(255,255,255,.04)', color: c.lancadoSGP?'#4ade80':'var(--text-3)', border:`1px solid ${c.lancadoSGP?'rgba(34,197,94,.25)':'var(--border)'}` }}>{c.lancadoSGP?<ClipboardCheck size={10}/>:<CircleDashed size={10}/>} SGP</button>
+                              </div>
                               {c.observacao && <div style={{ marginTop:4, fontSize:11, color:CORES.clientes, display:'flex', alignItems:'flex-start', gap:4 }}><Info size={11} style={{ flexShrink:0, marginTop:2 }}/>{c.observacao}</div>}
                             </td>
                             <td style={{ padding:'14px 20px' }}>
@@ -1065,7 +1269,8 @@ export default function App() {
                                 <button onClick={() => alternarStatusCliente(c.id, c.status)} className="badge" style={{ cursor:'pointer', border:`1px solid ${c.status==='Ativo'?'rgba(34,197,94,.25)':'rgba(244,63,94,.25)'}`, background: c.status==='Ativo'?'rgba(34,197,94,.12)':'rgba(244,63,94,.12)', color: c.status==='Ativo'?'#4ade80':'#fb7185' }}>
                                   {c.status==='Ativo'?<CheckCircle size={12}/>:<XCircle size={12}/>} {c.status}
                                 </button>
-                                <button className="icon-btn" onClick={() => { setEditandoClienteId(c.id); setCliente(c); window.scrollTo({top:0,behavior:'smooth'}); }}><Edit size={15}/></button>
+                                {c.ontId && <button className="icon-btn" title="Devolver ONT ao estoque" onClick={() => devolverOntCliente(c)} style={{ color:CORES.estoque }}><Undo2 size={15}/></button>}
+                                <button className="icon-btn" onClick={() => { setEditandoClienteId(c.id); setCliente({ ...clienteVazio, ...c }); window.scrollTo({top:0,behavior:'smooth'}); }}><Edit size={15}/></button>
                                 <button className="icon-btn danger" onClick={() => excluirCliente(c.id)}><Trash2 size={15}/></button>
                               </div>
                             </td>
@@ -1253,6 +1458,120 @@ export default function App() {
                         );
                       })}
                       {!loading && bobinas.length === 0 && <EmptyState Icon={Database} label="Nenhuma bobina cadastrada"/>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ====================== ESTOQUE ONT ====================== */}
+            {telaAtual === 'estoque' && (
+              <div>
+                <PageHeader Icon={HardDrive} color={CORES.estoque} title="Estoque de ONT" sub="Almoxarifado de equipamentos (comodato)">
+                  <button className="btn btn-ghost btn-sm" onClick={() => baixarCSV('Lumix_Estoque_ONT', 'Serial,Modelo,Marca,Status,Cliente', onts.map(o => [o.serial, o.modelo, o.marca, o.status, o.clienteNome || '']))}><Download size={14}/> CSV</button>
+                  <button className="btn btn-primary btn-sm" onClick={importarOntsLegado} style={{ background:'linear-gradient(135deg,#0891b2,#22d3ee)', boxShadow:'none' }}><PackagePlus size={14}/> Importar legado</button>
+                </PageHeader>
+
+                {/* Stats */}
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:12, marginBottom:22 }}>
+                  {[
+                    { label:'Em Estoque', val:ontEmEstoque, color:'#22d3ee', Icon:PackageCheck },
+                    { label:'Em Uso', val:ontEmUso, color:'#60a5fa', Icon:Link2 },
+                    { label:'Defeito', val:ontDefeito, color:'#fb7185', Icon:PackageX },
+                    { label:'Total', val:onts.length, color:'#a855f7', Icon:HardDrive },
+                  ].map(s => (
+                    <div key={s.label} className="kpi" style={{ textAlign:'center', padding:'16px 12px' }}>
+                      <s.Icon size={18} color={s.color} style={{ marginBottom:8 }}/>
+                      <p style={{ fontSize:9, fontWeight:700, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:'.08em', margin:'0 0 4px' }}>{s.label}</p>
+                      <p className="display" style={{ fontSize:22, fontWeight:700, color:s.color, margin:0 }}>{s.val}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid-form" style={{ display:'grid', gridTemplateColumns:'330px 1fr', gap:22 }}>
+                  {/* Form */}
+                  <div className="glass" style={{ borderRadius:'var(--radius-lg)', padding:26, borderColor:'rgba(34,211,238,.16)', height:'fit-content' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:9, marginBottom:22, paddingBottom:16, borderBottom:'1px solid var(--border)' }}>
+                      <PackagePlus size={17} color={CORES.estoque}/><span className="panel-title">Adicionar ONT</span>
+                      <div style={{ marginLeft:'auto', display:'flex', gap:3, padding:3, background:'rgba(6,10,18,.6)', borderRadius:10, border:'1px solid var(--border)' }}>
+                        <button onClick={() => { setModoLote(false); setOnt(ontVazia); }} style={btnTab(!modoLote, '#0891b2')}>Individual</button>
+                        <button onClick={() => { setModoLote(true); setOnt(ontVazia); }} style={btnTab(modoLote, '#0891b2')}>Em lote</button>
+                      </div>
+                    </div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                      {modoLote ? (
+                        <div>
+                          <p className="label">Seriais — um por linha {parseSeriais(ont.serial).length > 0 && <span style={{ color:'#67e8f9' }}>({parseSeriais(ont.serial).length} detectado(s))</span>}</p>
+                          <textarea className="input scroll" style={{ fontFamily:'monospace', height:150, resize:'vertical', lineHeight:1.6 }} placeholder={"ZTEGC1234567\nZTEGC1234568\nZTEGC1234569\n..."} value={ont.serial} onChange={e => setOnt({...ont, serial:e.target.value})}/>
+                        </div>
+                      ) : (
+                        <div><p className="label">Serial (SN)</p><input className="input" style={{ fontFamily:'monospace' }} placeholder="ZTEGC..." value={ont.serial} onChange={e => setOnt({...ont, serial:e.target.value})}/></div>
+                      )}
+                      <div>
+                        <p className="label">Modelo {modoLote && <span style={{ color:'var(--text-3)' }}>(aplica a todos)</span>}</p>
+                        <input className="input" list="ont-modelos" placeholder="ZTE F670L..." value={ont.modelo} onChange={e => setOnt({...ont, modelo:e.target.value})}/>
+                        <datalist id="ont-modelos">{ONT_MODELOS.map(m => <option key={m} value={m}/>)}</datalist>
+                      </div>
+                      <div><p className="label">Marca / fornecedor {modoLote && <span style={{ color:'var(--text-3)' }}>(aplica a todos)</span>}</p><input className="input" placeholder="ZTE, Huawei, Nokia..." value={ont.marca} onChange={e => setOnt({...ont, marca:e.target.value})}/></div>
+                      <button onClick={modoLote ? salvarOntLote : salvarOnt} className="btn btn-primary" style={{ background:'linear-gradient(135deg,#0891b2,#22d3ee)', boxShadow:'0 10px 22px -10px rgba(34,211,238,.6)' }}>
+                        {modoLote ? <><Boxes size={17}/> Adicionar {parseSeriais(ont.serial).length || ''} ao estoque</> : <><Save size={17}/> Adicionar ao estoque</>}
+                      </button>
+                      <p style={{ fontSize:11, color:'var(--text-3)', textAlign:'center', lineHeight:1.5 }}>
+                        {modoLote
+                          ? 'Cole a lista de seriais (Excel/nota fiscal). Duplicados são ignorados automaticamente.'
+                          : <>Entra como <b style={{ color:'#67e8f9' }}>Em Estoque</b>. Some do estoque ao vincular num cliente; volta ao desativar/devolver.</>}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Lista */}
+                  <div className="glass" style={{ borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+                    <div style={{ padding:'18px 22px', borderBottom:'1px solid var(--border)' }}>
+                      <div style={{ position:'relative', marginBottom:12 }}>
+                        <Search size={16} color="var(--text-3)" style={{ position:'absolute', left:14, top:'50%', transform:'translateY(-50%)' }}/>
+                        <input className="input" style={{ paddingLeft:42 }} placeholder="Buscar serial..." value={buscaOnt} onChange={e => setBuscaOnt(e.target.value)}/>
+                      </div>
+                      <div style={{ display:'flex', gap:4, padding:4, background:'rgba(6,10,18,.6)', borderRadius:12, border:'1px solid var(--border)', flexWrap:'wrap', width:'fit-content' }}>
+                        {['Todos','Em Estoque','Em Uso','Defeito'].map(s => (
+                          <button key={s} onClick={() => setFiltroStatusOnt(s)} style={btnTab(filtroStatusOnt===s, '#0891b2')}>
+                            {s} <span style={{ fontSize:9, padding:'1px 5px', borderRadius:4, background: filtroStatusOnt===s?'rgba(255,255,255,.25)':'rgba(255,255,255,.05)', color: filtroStatusOnt===s?'#fff':'var(--text-3)' }}>{countOnt[s]}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="scroll" style={{ padding:'16px 20px', display:'flex', flexDirection:'column', gap:10, overflowY:'auto', maxHeight:620 }}>
+                      {loading ? <SkeletonList/> : ontsFiltradas.map(o => {
+                        const cfg = {
+                          'Em Estoque': { c:'#22d3ee', bg:'rgba(34,211,238,.12)', bd:'rgba(34,211,238,.25)', Ic:PackageCheck },
+                          'Em Uso':     { c:'#60a5fa', bg:'rgba(59,130,246,.12)', bd:'rgba(59,130,246,.25)', Ic:Link2 },
+                          'Defeito':    { c:'#fb7185', bg:'rgba(244,63,94,.12)',  bd:'rgba(244,63,94,.25)',  Ic:PackageX },
+                        }[o.status] || { c:'#64748b', bg:'rgba(255,255,255,.05)', bd:'var(--border)', Ic:HardDrive };
+                        return (
+                          <div key={o.id} className="table-row" style={{ background:'rgba(6,10,18,.5)', borderRadius:16, padding:'16px 20px', border:'1px solid rgba(255,255,255,.04)', borderLeft:`3px solid ${cfg.c}`, display:'flex', justifyContent:'space-between', gap:16, alignItems:'center', flexWrap:'wrap' }}>
+                            <div style={{ flex:1, minWidth:200 }}>
+                              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5, flexWrap:'wrap' }}>
+                                <span style={{ fontSize:14, fontWeight:700, color:'#fff', fontFamily:'monospace', letterSpacing:'.03em' }}>{o.serial}</span>
+                                <span className="badge" style={{ background:cfg.bg, color:cfg.c, border:`1px solid ${cfg.bd}` }}><cfg.Ic size={11}/> {o.status}</span>
+                              </div>
+                              <div style={{ fontSize:11, color:'var(--text-3)', display:'flex', gap:12, flexWrap:'wrap' }}>
+                                <span>{o.modelo || 'modelo n/d'}{o.marca ? ` · ${o.marca}` : ''}</span>
+                                {o.status === 'Em Uso' && o.clienteNome && <span style={{ display:'flex', alignItems:'center', gap:4, color:'#60a5fa' }}><Link2 size={11}/> {o.clienteNome}</span>}
+                              </div>
+                            </div>
+                            <div style={{ display:'flex', gap:4 }}>
+                              {o.status === 'Em Uso' ? (
+                                <button className="btn btn-ghost btn-sm" onClick={() => desvincularOnt(o)} style={{ color:CORES.estoque }}><Undo2 size={13}/> Devolver</button>
+                              ) : (
+                                <>
+                                  <button className="icon-btn" title={o.status === 'Defeito' ? 'Voltar ao estoque' : 'Marcar defeito'} onClick={() => alternarDefeitoOnt(o)} style={{ color: o.status === 'Defeito' ? '#22d3ee' : '#fb7185' }}>{o.status === 'Defeito' ? <Undo2 size={15}/> : <PackageX size={15}/>}</button>
+                                  <button className="icon-btn danger" onClick={() => excluirOnt(o)}><Trash2 size={15}/></button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {!loading && ontsFiltradas.length === 0 && <EmptyState Icon={HardDrive} label="Nenhuma ONT no estoque"/>}
                     </div>
                   </div>
                 </div>
