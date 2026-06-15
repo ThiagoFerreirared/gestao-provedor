@@ -53,6 +53,9 @@ export default function App() {
   const [modoLote, setModoLote] = useState(false);
   const ontVazia = { serial:'', modelo:'', marca:'' };
   const [ont, setOnt] = useState(ontVazia);
+  // edição de equipamento + baixa (perda / roubo / não devolução)
+  const MOTIVOS_BAIXA = ['Perdido pelo cliente', 'Roubado / furtado', 'Não devolvido', 'Dano sem reparo (perda total)', 'Outro'];
+  const [ontEdit, setOntEdit] = useState(null);
 
   // ---- Estados: Suporte (OS) ----
   const [ordens, setOrdens] = useState([]);
@@ -338,6 +341,54 @@ export default function App() {
     }
   };
 
+  // abrir modal de edição do equipamento (dados + situação/baixa)
+  const abrirEdicaoOnt = (o) => setOntEdit({
+    id: o.id, serial: o.serial || '', modelo: o.modelo || '', marca: o.marca || '',
+    status: o.status, motivoBaixa: o.motivoBaixa || '', _orig: o,
+  });
+  // status que podem ser escolhidos na edição (Em Uso só é mantido, nunca atribuído manualmente)
+  const statusEditaveis = (orig) => orig?.status === 'Em Uso'
+    ? ['Em Uso', 'Em Estoque', 'Defeito', 'Baixado']
+    : ['Em Estoque', 'Defeito', 'Baixado'];
+
+  const salvarEdicaoOnt = async () => {
+    const e = ontEdit, orig = e._orig;
+    const serial = e.serial.trim();
+    if (!serial) return notify('error', 'Serial do equipamento é obrigatório.');
+    if (onts.find(o => o.id !== e.id && (o.serial || '').toLowerCase() === serial.toLowerCase()))
+      return notify('warning', `Serial ${serial} já existe em outro equipamento.`);
+    if (e.status === 'Baixado' && !e.motivoBaixa) return notify('error', 'Selecione o motivo da baixa.');
+    try {
+      const payload = { serial, modelo: (e.modelo || '').trim(), marca: (e.marca || '').trim(), status: e.status };
+      const saiuDeUso = orig.status === 'Em Uso' && e.status !== 'Em Uso';
+
+      if (e.status === 'Baixado') {
+        payload.motivoBaixa = e.motivoBaixa;
+        payload.dataBaixa = new Date().toISOString();
+      } else {
+        payload.motivoBaixa = null;
+        payload.dataBaixa = null;
+      }
+
+      if (saiuDeUso) {
+        // desvincula o cliente que estava com o equipamento
+        if (orig.clienteId) await updateDoc(doc(db, "clientes", orig.clienteId), { ontId: '', serial: '' }).catch(() => {});
+        if (e.status === 'Baixado') {
+          payload.dataVinculo = null; // mantém clienteId/clienteNome como responsável pela perda
+        } else {
+          payload.clienteId = null; payload.clienteNome = null; payload.dataVinculo = null;
+        }
+      } else if (orig.status === 'Em Uso' && e.status === 'Em Uso' && orig.clienteId && serial !== orig.serial) {
+        // segue em uso, mas o serial mudou → mantém o cadastro do cliente em sincronia
+        await updateDoc(doc(db, "clientes", orig.clienteId), { serial }).catch(() => {});
+      }
+
+      await updateDoc(doc(db, "onts", e.id), payload);
+      setOntEdit(null);
+      notify('success', e.status === 'Baixado' ? `Baixa registrada (${e.motivoBaixa}).` : 'Equipamento atualizado.');
+    } catch { notify('error', 'Erro ao atualizar equipamento.'); }
+  };
+
   // Q4 — importar seriais dos clientes ativos como "Em Uso"
   const importarOntsLegado = async () => {
     const jaExiste = new Set(onts.map(o => (o.serial || '').toLowerCase()));
@@ -510,8 +561,9 @@ export default function App() {
   const ontEmEstoque = onts.filter(o => o.status === 'Em Estoque').length;
   const ontEmUso = onts.filter(o => o.status === 'Em Uso').length;
   const ontDefeito = onts.filter(o => o.status === 'Defeito').length;
+  const ontBaixado = onts.filter(o => o.status === 'Baixado').length;
   const ontBaixo = ontEmEstoque <= 3;
-  const countOnt = { 'Todos': onts.length, 'Em Estoque': ontEmEstoque, 'Em Uso': ontEmUso, 'Defeito': ontDefeito };
+  const countOnt = { 'Todos': onts.length, 'Em Estoque': ontEmEstoque, 'Em Uso': ontEmUso, 'Defeito': ontDefeito, 'Baixado': ontBaixado };
   const ontPorMarca = Object.entries(
     onts.reduce((a, o) => { const k = (o.marca || '').trim() || 'Sem marca'; a[k] = (a[k] || 0) + 1; return a; }, {})
   ).map(([label, value]) => ({ label, value, color: CORES.estoque })).sort((a, b) => b.value - a.value).slice(0, 6);
@@ -616,6 +668,61 @@ export default function App() {
                 style={ confirmState.danger ? { background:'linear-gradient(135deg,#e11d48,#f43f5e)', boxShadow:'0 10px 22px -10px rgba(244,63,94,.8)' } : undefined }>
                 {confirmState.confirmLabel || 'Confirmar'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITAR EQUIPAMENTO / BAIXA */}
+      {ontEdit && (
+        <div className="modal-backdrop" onClick={() => setOntEdit(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:18 }}>
+              <div style={{ background:'rgba(34,211,238,.13)', borderRadius:12, padding:10, display:'flex' }}>
+                <Edit size={20} color="#22d3ee"/>
+              </div>
+              <div>
+                <h3 className="display" style={{ fontSize:17, fontWeight:700, color:'#fff', margin:0 }}>Editar equipamento</h3>
+                <p style={{ fontSize:12, color:'var(--text-3)', margin:'2px 0 0' }}>Corrija os dados ou registre uma baixa</p>
+              </div>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+              <div><p className="label">Serial (SN)</p><input className="input" style={{ fontFamily:'monospace' }} value={ontEdit.serial} onChange={e => setOntEdit({ ...ontEdit, serial:e.target.value })}/></div>
+              <div>
+                <p className="label">Modelo</p>
+                <input className="input" list="ont-modelos" placeholder="ZTE F670L..." value={ontEdit.modelo} onChange={e => setOntEdit({ ...ontEdit, modelo:e.target.value })}/>
+                <datalist id="ont-modelos">{ONT_MODELOS.map(m => <option key={m} value={m}/>)}</datalist>
+              </div>
+              <div><p className="label">Marca / fornecedor</p><input className="input" placeholder="ZTE, Huawei, Nokia..." value={ontEdit.marca} onChange={e => setOntEdit({ ...ontEdit, marca:e.target.value })}/></div>
+              <div>
+                <p className="label">Situação</p>
+                <select className="input" value={ontEdit.status} onChange={e => setOntEdit({ ...ontEdit, status:e.target.value })}>
+                  {statusEditaveis(ontEdit._orig).map(s => <option key={s} value={s}>{s === 'Baixado' ? 'Baixa (perda / roubo / não devolvido)' : s}</option>)}
+                </select>
+              </div>
+              {ontEdit.status === 'Baixado' && (
+                <div>
+                  <p className="label">Motivo da baixa</p>
+                  <select className="input" value={ontEdit.motivoBaixa || ''} onChange={e => setOntEdit({ ...ontEdit, motivoBaixa:e.target.value })}>
+                    <option value="">Selecione o motivo...</option>
+                    {MOTIVOS_BAIXA.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  {ontEdit._orig?.clienteNome && (
+                    <p style={{ fontSize:11, color:'var(--text-3)', margin:'8px 0 0', lineHeight:1.5 }}>
+                      Responsável: <b style={{ color:'#fcd34d' }}>{ontEdit._orig.clienteNome}</b> — será desvinculado, mas fica registrado no histórico.
+                    </p>
+                  )}
+                </div>
+              )}
+              {ontEdit._orig?.status === 'Em Uso' && ontEdit.status === 'Em Estoque' && (
+                <p style={{ fontSize:11, color:'var(--text-3)', margin:0, lineHeight:1.5 }}>
+                  O equipamento será <b style={{ color:'#67e8f9' }}>devolvido</b> e desvinculado de {ontEdit._orig.clienteNome || 'cliente'}.
+                </p>
+              )}
+            </div>
+            <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:22 }}>
+              <button className="btn btn-ghost" onClick={() => setOntEdit(null)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={salvarEdicaoOnt} style={{ background:'linear-gradient(135deg,#0891b2,#22d3ee)', boxShadow:'0 10px 22px -10px rgba(34,211,238,.6)' }}><Save size={15}/> Salvar</button>
             </div>
           </div>
         </div>
@@ -1122,7 +1229,7 @@ export default function App() {
             {telaAtual === 'estoque' && (
               <div>
                 <PageHeader Icon={HardDrive} color={CORES.estoque} title="Estoque de ONT" sub="Almoxarifado de equipamentos (comodato)">
-                  <button className="btn btn-ghost btn-sm" onClick={() => baixarCSV('Lumix_Estoque_ONT', 'Serial,Modelo,Marca,Status,Cliente', onts.map(o => [o.serial, o.modelo, o.marca, o.status, o.clienteNome || '']))}><Download size={14}/> CSV</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => baixarCSV('Lumix_Estoque_ONT', 'Serial,Modelo,Marca,Status,Cliente,Motivo', onts.map(o => [o.serial, o.modelo, o.marca, o.status, o.clienteNome || '', o.motivoBaixa || '']))}><Download size={14}/> CSV</button>
                   <button className="btn btn-primary btn-sm" onClick={importarOntsLegado} style={{ background:'linear-gradient(135deg,#0891b2,#22d3ee)', boxShadow:'none' }}><PackagePlus size={14}/> Importar legado</button>
                 </PageHeader>
 
@@ -1132,6 +1239,7 @@ export default function App() {
                     { label:'Em Estoque', val:ontEmEstoque, color:'#22d3ee', Icon:PackageCheck },
                     { label:'Em Uso', val:ontEmUso, color:'#60a5fa', Icon:Link2 },
                     { label:'Defeito', val:ontDefeito, color:'#fb7185', Icon:PackageX },
+                    { label:'Baixado', val:ontBaixado, color:'#f59e0b', Icon:AlertTriangle },
                     { label:'Total', val:onts.length, color:'#a855f7', Icon:HardDrive },
                   ].map(s => (
                     <div key={s.label} className="kpi" style={{ textAlign:'center', padding:'16px 12px' }}>
@@ -1186,7 +1294,7 @@ export default function App() {
                         <input className="input" style={{ paddingLeft:42 }} placeholder="Buscar serial..." value={buscaOnt} onChange={e => setBuscaOnt(e.target.value)}/>
                       </div>
                       <div style={{ display:'flex', gap:4, padding:4, background:'rgba(6,10,18,.6)', borderRadius:12, border:'1px solid var(--border)', flexWrap:'wrap', width:'fit-content' }}>
-                        {['Todos','Em Estoque','Em Uso','Defeito'].map(s => (
+                        {['Todos','Em Estoque','Em Uso','Defeito','Baixado'].map(s => (
                           <button key={s} onClick={() => setFiltroStatusOnt(s)} style={btnTab(filtroStatusOnt===s, '#0891b2')}>
                             {s} <span style={{ fontSize:9, padding:'1px 5px', borderRadius:4, background: filtroStatusOnt===s?'rgba(255,255,255,.25)':'rgba(255,255,255,.05)', color: filtroStatusOnt===s?'#fff':'var(--text-3)' }}>{countOnt[s]}</span>
                           </button>
@@ -1199,6 +1307,7 @@ export default function App() {
                           'Em Estoque': { c:'#22d3ee', bg:'rgba(34,211,238,.12)', bd:'rgba(34,211,238,.25)', Ic:PackageCheck },
                           'Em Uso':     { c:'#60a5fa', bg:'rgba(59,130,246,.12)', bd:'rgba(59,130,246,.25)', Ic:Link2 },
                           'Defeito':    { c:'#fb7185', bg:'rgba(244,63,94,.12)',  bd:'rgba(244,63,94,.25)',  Ic:PackageX },
+                          'Baixado':    { c:'#f59e0b', bg:'rgba(245,158,11,.12)', bd:'rgba(245,158,11,.25)', Ic:AlertTriangle },
                         }[o.status] || { c:'#64748b', bg:'rgba(255,255,255,.05)', bd:'var(--border)', Ic:HardDrive };
                         return (
                           <div key={o.id} className="table-row" style={{ background:'rgba(6,10,18,.5)', borderRadius:16, padding:'16px 20px', border:'1px solid rgba(255,255,255,.04)', borderLeft:`3px solid ${cfg.c}`, display:'flex', justifyContent:'space-between', gap:16, alignItems:'center', flexWrap:'wrap' }}>
@@ -1210,16 +1319,19 @@ export default function App() {
                               <div style={{ fontSize:11, color:'var(--text-3)', display:'flex', gap:12, flexWrap:'wrap' }}>
                                 <span>{o.modelo || 'modelo n/d'}{o.marca ? ` · ${o.marca}` : ''}</span>
                                 {o.status === 'Em Uso' && o.clienteNome && <span style={{ display:'flex', alignItems:'center', gap:4, color:'#60a5fa' }}><Link2 size={11}/> {o.clienteNome}</span>}
+                                {o.status === 'Baixado' && <span style={{ display:'flex', alignItems:'center', gap:4, color:'#fbbf24' }}><AlertTriangle size={11}/> {o.motivoBaixa || 'Baixado'}{o.clienteNome ? ` · ${o.clienteNome}` : ''}</span>}
                               </div>
                             </div>
                             <div style={{ display:'flex', gap:4 }}>
-                              {o.status === 'Em Uso' ? (
+                              <button className="icon-btn" title="Editar / registrar baixa" onClick={() => abrirEdicaoOnt(o)}><Edit size={15}/></button>
+                              {o.status === 'Em Uso' && (
                                 <button className="btn btn-ghost btn-sm" onClick={() => desvincularOnt(o)} style={{ color:CORES.estoque }}><Undo2 size={13}/> Devolver</button>
-                              ) : (
-                                <>
-                                  <button className="icon-btn" title={o.status === 'Defeito' ? 'Voltar ao estoque' : 'Marcar defeito'} onClick={() => alternarDefeitoOnt(o)} style={{ color: o.status === 'Defeito' ? '#22d3ee' : '#fb7185' }}>{o.status === 'Defeito' ? <Undo2 size={15}/> : <PackageX size={15}/>}</button>
-                                  <button className="icon-btn danger" onClick={() => excluirOnt(o)}><Trash2 size={15}/></button>
-                                </>
+                              )}
+                              {(o.status === 'Em Estoque' || o.status === 'Defeito') && (
+                                <button className="icon-btn" title={o.status === 'Defeito' ? 'Voltar ao estoque' : 'Marcar defeito'} onClick={() => alternarDefeitoOnt(o)} style={{ color: o.status === 'Defeito' ? '#22d3ee' : '#fb7185' }}>{o.status === 'Defeito' ? <Undo2 size={15}/> : <PackageX size={15}/>}</button>
+                              )}
+                              {o.status !== 'Em Uso' && (
+                                <button className="icon-btn danger" onClick={() => excluirOnt(o)}><Trash2 size={15}/></button>
                               )}
                             </div>
                           </div>
